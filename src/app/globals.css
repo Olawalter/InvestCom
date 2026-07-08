@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Archivo+Black&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --navy: #050A18;
+  --committee-blue: #2563EB;
+  --signal-cyan: #22D3EE;
+  --policy-gold: #F5B841;
+  --risk-red: #FF4D5E;
+  --liquidity-green: #2CE88A;
+  --governance-purple: #8B5CF6;
+  --paper-white: #F7F3EA;
+  --slate-grey: #8B93A1;
+  --graphite: #111827;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #050A18;
+  color: #F7F3EA;
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+code, pre, .mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.accent {
+  font-family: 'Archivo Black', sans-serif;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #111827;
+}
+::-webkit-scrollbar-thumb {
+  background: #2563EB;
+  border-radius: 3px;
+}
+
+/* Panel styles */
+.panel {
+  background: #111827;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 12px;
+}
+
+.panel-gold {
+  background: #111827;
+  border: 1px solid rgba(245, 184, 65, 0.3);
+  border-radius: 12px;
+}
+
+/* Glow effects */
+.glow-blue {
+  box-shadow: 0 0 20px rgba(37, 99, 235, 0.3);
+}
+.glow-cyan {
+  box-shadow: 0 0 20px rgba(34, 211, 238, 0.2);
+}
+.glow-gold {
+  box-shadow: 0 0 20px rgba(245, 184, 65, 0.2);
+}
+.glow-green {
+  box-shadow: 0 0 20px rgba(44, 232, 138, 0.2);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #22D3EE, #2563EB);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-gold {
+  background: linear-gradient(135deg, #F5B841, #FF4D5E);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Band pill */
+.band-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Animation */
+@keyframes pulse-blue {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.pulse-blue {
+  animation: pulse-blue 2s ease-in-out infinite;
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
+/* Committee seal */
+.seal-ring {
+  border: 2px solid rgba(245, 184, 65, 0.6);
+  border-radius: 50%;
+}

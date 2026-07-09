@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/context/WalletContext";
-import { getCommitteesByDao, getProposalsByProposer } from "@/lib/genlayer";
+import { getAllCommittees, getCommitteeProposals } from "@/lib/genlayer";
 import type { InvestmentCommittee, InvestmentProposal } from "@/lib/types";
 import { statusLabel, statusColor, formatDate, formatAddress, truncate } from "@/lib/utils";
 import { Loader2, Wallet, Building2, FileText, ArrowRight } from "lucide-react";
@@ -20,12 +20,27 @@ export default function ProfilePage() {
       if (!client || !address) return;
       setLoading(true);
       try {
-        const [daoComms, myProposals] = await Promise.all([
-          getCommitteesByDao(client, address),
-          getProposalsByProposer(client, address),
-        ]);
-        setCommittees(daoComms as unknown as InvestmentCommittee[]);
-        setProposals(myProposals as unknown as InvestmentProposal[]);
+        // Compare addresses in a format-agnostic way: strip 0x prefix and lowercase both sides.
+        // GenLayer Python str(gl.message.sender_address) may produce a different case or omit
+        // the 0x prefix vs. what an EIP-55 wallet returns, so index-based lookups (TreeMap key
+        // exact match) are unreliable. Fetching all and filtering client-side is always correct.
+        const norm = (a: string) => a.toLowerCase().replace(/^0x/, "");
+        const myAddr = norm(address);
+
+        const allCommittees = (await getAllCommittees(client)) as unknown as InvestmentCommittee[];
+        const daoCommittees = allCommittees.filter((c) => norm(c.dao ?? "") === myAddr);
+        setCommittees(daoCommittees);
+
+        // Fetch proposals from every committee in parallel; filter by proposer client-side.
+        const propArrays = await Promise.all(
+          allCommittees.map((c) =>
+            getCommitteeProposals(client, c.committee_id)
+              .then((p) => p as unknown as InvestmentProposal[])
+              .catch(() => [] as InvestmentProposal[])
+          )
+        );
+        const myProposals = propArrays.flat().filter((p) => norm(p.proposer ?? "") === myAddr);
+        setProposals(myProposals);
       } catch {
         // silently fail
       } finally {

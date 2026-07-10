@@ -26,3 +26,5 @@ next-env.d.ts
 
 # Claude Code session data
 .claude/
+
+.vercel

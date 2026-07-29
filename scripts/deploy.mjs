@@ -9,7 +9,7 @@
  * Then restart the dev server.
  */
 
-import { createAccount, abi } from "genlayer-js";
+import { createAccount, abi, createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { encodeFunctionData } from "viem";
 import fs from "fs";
@@ -48,8 +48,10 @@ const contractSource = fs.readFileSync(
   "utf8"
 );
 const sourceBytes = new TextEncoder().encode(contractSource);
-// Second element `true` signals a deployment (not a function call)
-const txData = abi.transactions.serialize([sourceBytes, true]);
+// GenVM deploy format: [code, encoded_calldata_for_constructor, leaderOnly]
+// makeCalldataObject(undefined, [], {}) produces an empty {} calldata for the constructor
+const constructorCalldata = abi.calldata.encode(abi.calldata.makeCalldataObject(undefined, [], {}));
+const txData = abi.transactions.serialize([sourceBytes, constructorCalldata, false]);
 
 const evmData = encodeFunctionData({
   abi: consensus.abi,
@@ -83,8 +85,34 @@ const signed = await account.signTransaction({
 const txHash = await rpc("eth_sendRawTransaction", [signed], 3);
 console.log("\nDeploy tx submitted:", txHash);
 console.log("Explorer:", `https://explorer-studio.genlayer.com/tx/${txHash}`);
-console.log("\nWait 30–60s then open the explorer link.");
-console.log("Find the new contract address in the explorer under this tx.");
-console.log("Then update .env.local:");
-console.log("  NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=<new-address>");
-console.log("And restart the dev server: npm run dev");
+
+// Wait for receipt and extract the GenLayer txId from event logs
+console.log("\nWaiting for transaction receipt…");
+let receipt = null;
+for (let i = 0; i < 30; i++) {
+  await new Promise(r => setTimeout(r, 4000));
+  receipt = await rpc("eth_getTransactionReceipt", [txHash], 4).catch(() => null);
+  if (receipt) break;
+  process.stdout.write(".");
+}
+console.log();
+
+if (!receipt) {
+  console.log("Receipt not found yet. Check the explorer link above.");
+  console.log("The contract address is the txId from the NewTransaction event log.");
+  process.exit(0);
+}
+
+// The NewTransaction event: topic[1] = txId (bytes32) = GenLayer transaction ID.
+// For a deploy, this txId IS the address used to interact with the new contract.
+const log = receipt.logs?.[0];
+if (log && log.topics?.[1]) {
+  // txId is a 32-byte hex; GenLayer contract address = last 20 bytes (40 hex chars)
+  const txId = log.topics[1];
+  const contractAddr = "0x" + txId.slice(-40);
+  console.log("\n✓ New contract address:", contractAddr);
+  console.log("\nUpdate .env.local:");
+  console.log(`  NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=${contractAddr}`);
+} else {
+  console.log("Could not extract contract address from logs. Check explorer.");
+}

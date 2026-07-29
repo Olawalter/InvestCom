@@ -3,7 +3,7 @@ from genlayer import *
 from datetime import datetime, timezone
 import json
 
-# ─── Valid enum sets ──────────────────────────────────────────────────────────
+# ---- Valid enum sets -------------------------------------------------------
 
 VALID_RISK_APPETITES = {"conservative", "moderate", "aggressive"}
 
@@ -34,7 +34,9 @@ VALID_FUNDAMENTALS_BANDS = {"weak", "questionable", "acceptable", "strong", "exc
 VALID_GOVERNANCE_BANDS   = {"dangerous", "weak", "acceptable", "strong", "excellent"}
 VALID_OBJECTIVE_BANDS    = {"misaligned", "weak", "acceptable", "strong", "excellent"}
 
-# Fields that must match exactly between leader and validator outputs
+# Fields that must agree between leader and validator.
+# Free-form text fields are excluded; independent LLM calls produce different
+# phrasing but should agree on the structured outcome.
 CANONICAL_FIELDS = [
     "verdict",
     "recommended_proposal_id",
@@ -44,15 +46,13 @@ CANONICAL_FIELDS = [
     "fundamentals_band",
     "governance_band",
     "treasury_objective_fit",
-    # reason_code is free-form text — excluded from consensus check to avoid
-    # false disagreements between validators calling the LLM independently
 ]
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+# ---- Helpers ---------------------------------------------------------------
 
 def _now() -> int:
-    # GenVM pins datetime.now() to the transaction timestamp — deterministic across validators
+    # GenVM pins datetime.now() to the transaction timestamp -- deterministic
     return int(datetime.now(timezone.utc).timestamp())
 
 
@@ -75,34 +75,45 @@ def _confidence_band(c: int) -> str:
     return "low"
 
 
-# ─── Contract ─────────────────────────────────────────────────────────────────
+def _normalise_addr(addr) -> str:
+    """Return a canonical lowercase 0x-prefixed address string.
+
+    GenLayer's str(gl.message.sender_address) format may vary between
+    runtimes (checksummed vs lowercase, with or without 0x prefix).
+    Normalising before storage ensures all index lookups are consistent
+    regardless of what the validator node or test runner produces.
+    """
+    s = str(addr).strip().lower()
+    if not s.startswith("0x"):
+        s = "0x" + s
+    return s
+
+
+# ---- Contract --------------------------------------------------------------
 
 class InvestmentCommitteeProtocol(gl.Contract):
-    # ── Counters (GenVM sized integer — not plain int) ────────────────────────
+    # Counters
     _committee_counter: u64
-    _proposal_counter: u64
-    _appeal_counter: u64
+    _proposal_counter:  u64
+    _appeal_counter:    u64
 
-    # ── Primary storage: entity blobs as JSON strings ─────────────────────────
-    # Plain dict/list/int are forbidden in storage; use TreeMap[K, V] and u64
+    # Primary storage: entity blobs as JSON strings
     _committees:      TreeMap[str, str]   # str(committee_id) -> JSON
     _proposals:       TreeMap[str, str]   # str(proposal_id)  -> JSON
     _recommendations: TreeMap[str, str]   # str(committee_id) -> JSON
     _appeals:         TreeMap[str, str]   # str(committee_id) -> JSON
 
-    # ── Index maps ────────────────────────────────────────────────────────────
-    _committees_by_dao:       TreeMap[str, str]  # dao_address      -> JSON list of cids
-    _proposals_by_committee:  TreeMap[str, str]  # str(cid)         -> JSON list of pids
-    _proposals_by_proposer:   TreeMap[str, str]  # proposer_address -> JSON list of pids
+    # Index maps (keys are always normalised addresses)
+    _committees_by_dao:      TreeMap[str, str]  # normalised dao addr  -> JSON list of cids
+    _proposals_by_committee: TreeMap[str, str]  # str(cid)             -> JSON list of pids
+    _proposals_by_proposer:  TreeMap[str, str]  # normalised proposer  -> JSON list of pids
 
     def __init__(self) -> None:
-        # u64 and TreeMap storage fields are zero-initialised by GenVM;
-        # explicit assignment here is for clarity only.
         self._committee_counter = u64(0)
         self._proposal_counter  = u64(0)
         self._appeal_counter    = u64(0)
 
-    # ── Internal loaders ──────────────────────────────────────────────────────
+    # ---- Internal loaders --------------------------------------------------
 
     def _load_committee(self, committee_id: int) -> dict:
         raw = self._committees.get(str(committee_id), "")
@@ -117,9 +128,9 @@ class InvestmentCommitteeProtocol(gl.Contract):
     def _proposal_ids_for(self, committee_id: int) -> list:
         return json.loads(self._proposals_by_committee.get(str(committee_id), "[]"))
 
-    # ══════════════════════════════════════════════════════════════════════════
+    # =========================================================================
     # Committee methods
-    # ══════════════════════════════════════════════════════════════════════════
+    # =========================================================================
 
     @gl.public.write
     def create_committee(
@@ -137,52 +148,52 @@ class InvestmentCommitteeProtocol(gl.Contract):
         proposal_deadline: int,
         appeal_window: int,
     ) -> int:
-        assert 3 <= len(dao_name) <= 80, "DAO name must be 3–80 chars"
-        assert 30 <= len(treasury_objective) <= 2000, "Treasury objective must be 30–2000 chars"
-        assert risk_appetite in VALID_RISK_APPETITES, f"Invalid risk appetite: {risk_appetite}"
-        assert 20 <= len(liquidity_requirement) <= 1000, "Liquidity requirement must be 20–1000 chars"
+        assert 3  <= len(dao_name)           <= 80,   "DAO name must be 3-80 chars"
+        assert 30 <= len(treasury_objective) <= 2000, "Treasury objective must be 30-2000 chars"
+        assert risk_appetite in VALID_RISK_APPETITES,  f"Invalid risk appetite: {risk_appetite}"
+        assert 20 <= len(liquidity_requirement) <= 1000, "Liquidity requirement must be 20-1000 chars"
         assert _validate_weights(evaluation_weights), "Evaluation weights must sum to 100"
         assert proposal_deadline > _now(), "Proposal deadline must be in the future"
-        assert appeal_window > 0, "Appeal window must be positive (seconds)"
+        assert appeal_window > 0,          "Appeal window must be positive (seconds)"
 
         self._committee_counter = u64(int(self._committee_counter) + 1)
         cid = int(self._committee_counter)
-        dao = str(gl.message.sender_address)
+        dao = _normalise_addr(gl.message.sender_address)
 
         committee = {
-            "committee_id": cid,
-            "dao": dao,
-            "dao_name": dao_name,
-            "treasury_objective": treasury_objective,
-            "risk_appetite": risk_appetite,
-            "liquidity_requirement": liquidity_requirement,
+            "committee_id":                  cid,
+            "dao":                           dao,
+            "dao_name":                      dao_name,
+            "treasury_objective":            treasury_objective,
+            "risk_appetite":                 risk_appetite,
+            "liquidity_requirement":         liquidity_requirement,
             "max_single_asset_exposure_bps": max_single_asset_exposure_bps,
-            "max_protocol_exposure_bps": max_protocol_exposure_bps,
-            "allowed_asset_classes": allowed_asset_classes,
-            "disallowed_assets": disallowed_assets,
-            "governance_constraints": governance_constraints,
-            "evaluation_weights": evaluation_weights,
-            "proposal_deadline": proposal_deadline,
-            "appeal_window": appeal_window,
-            "appeal_deadline": 0,
-            "status": "draft",
-            "created_at": _now(),
-            "finalized": False,
+            "max_protocol_exposure_bps":     max_protocol_exposure_bps,
+            "allowed_asset_classes":         allowed_asset_classes,
+            "disallowed_assets":             disallowed_assets,
+            "governance_constraints":        governance_constraints,
+            "evaluation_weights":            evaluation_weights,
+            "proposal_deadline":             proposal_deadline,
+            "appeal_window":                 appeal_window,
+            "appeal_deadline":               0,
+            "status":                        "draft",
+            "created_at":                    _now(),
+            "finalized":                     False,
         }
         self._committees[str(cid)] = json.dumps(committee)
 
-        existing_dao_ids = json.loads(self._committees_by_dao.get(dao, "[]"))
-        existing_dao_ids.append(cid)
-        self._committees_by_dao[dao] = json.dumps(existing_dao_ids)
+        existing = json.loads(self._committees_by_dao.get(dao, "[]"))
+        existing.append(cid)
+        self._committees_by_dao[dao] = json.dumps(existing)
 
         self._proposals_by_committee[str(cid)] = "[]"
-
         return cid
 
     @gl.public.write
     def open_committee(self, committee_id: int) -> None:
         c = self._load_committee(committee_id)
-        assert str(gl.message.sender_address) == c["dao"], "Only the DAO may open this committee"
+        assert _normalise_addr(gl.message.sender_address) == c["dao"], \
+            "Only the DAO may open this committee"
         assert c["status"] == "draft", "Committee must be in draft status"
         c["status"] = "open_for_proposals"
         self._committees[str(committee_id)] = json.dumps(c)
@@ -190,7 +201,8 @@ class InvestmentCommitteeProtocol(gl.Contract):
     @gl.public.write
     def close_proposals(self, committee_id: int) -> None:
         c = self._load_committee(committee_id)
-        assert str(gl.message.sender_address) == c["dao"], "Only the DAO may close proposals"
+        assert _normalise_addr(gl.message.sender_address) == c["dao"], \
+            "Only the DAO may close proposals"
         assert c["status"] == "open_for_proposals", "Committee must be open for proposals"
         assert len(self._proposal_ids_for(committee_id)) > 0, "No proposals submitted yet"
         c["status"] = "proposal_submission_closed"
@@ -199,14 +211,16 @@ class InvestmentCommitteeProtocol(gl.Contract):
     @gl.public.write
     def cancel_committee(self, committee_id: int) -> None:
         c = self._load_committee(committee_id)
-        assert str(gl.message.sender_address) == c["dao"], "Only the DAO may cancel"
-        assert c["status"] not in {"finalized", "cancelled"}, "Cannot cancel a finalised committee"
+        assert _normalise_addr(gl.message.sender_address) == c["dao"], \
+            "Only the DAO may cancel"
+        assert c["status"] not in {"finalized", "cancelled"}, \
+            "Cannot cancel a finalised committee"
         c["status"] = "cancelled"
         self._committees[str(committee_id)] = json.dumps(c)
 
-    # ══════════════════════════════════════════════════════════════════════════
+    # =========================================================================
     # Proposal methods
-    # ══════════════════════════════════════════════════════════════════════════
+    # =========================================================================
 
     @gl.public.write
     def submit_proposal(
@@ -225,14 +239,14 @@ class InvestmentCommitteeProtocol(gl.Contract):
     ) -> int:
         c = self._load_committee(committee_id)
         assert c["status"] == "open_for_proposals", "Committee is not open for proposals"
-        assert _now() < c["proposal_deadline"], "Proposal deadline has passed"
-        assert 6  <= len(title)              <= 120,  "Title must be 6–120 chars"
-        assert 50 <= len(summary)            <= 3000, "Summary must be 50–3000 chars"
-        assert 50 <= len(risk_thesis)        <= 3000, "Risk thesis must be 50–3000 chars"
-        assert 50 <= len(fundamental_thesis) <= 3000, "Fundamental thesis must be 50–3000 chars"
-        assert 30 <= len(governance_risks)   <= 2000, "Governance risks must be 30–2000 chars"
-        assert len(liquidity_profile) >= 1, "Liquidity profile cannot be empty"
-        assert 1 <= len(evidence_urls) <= 8, "Must provide 1–8 evidence URLs"
+        assert _now() < c["proposal_deadline"],    "Proposal deadline has passed"
+        assert 6  <= len(title)              <= 120,  "Title must be 6-120 chars"
+        assert 50 <= len(summary)            <= 3000, "Summary must be 50-3000 chars"
+        assert 50 <= len(risk_thesis)        <= 3000, "Risk thesis must be 50-3000 chars"
+        assert 50 <= len(fundamental_thesis) <= 3000, "Fundamental thesis must be 50-3000 chars"
+        assert 30 <= len(governance_risks)   <= 2000, "Governance risks must be 30-2000 chars"
+        assert len(liquidity_profile) >= 1,           "Liquidity profile cannot be empty"
+        assert 1 <= len(evidence_urls) <= 8,          "Must provide 1-8 evidence URLs"
         for url in evidence_urls:
             assert _validate_url(url), f"Invalid URL: {url}"
         assert allocation_bps <= c["max_single_asset_exposure_bps"], \
@@ -240,26 +254,26 @@ class InvestmentCommitteeProtocol(gl.Contract):
 
         self._proposal_counter = u64(int(self._proposal_counter) + 1)
         pid      = int(self._proposal_counter)
-        proposer = str(gl.message.sender_address)
+        proposer = _normalise_addr(gl.message.sender_address)
         now      = _now()
 
         proposal = {
-            "proposal_id": pid,
-            "committee_id": committee_id,
-            "proposer": proposer,
-            "title": title,
-            "summary": summary,
-            "asset_or_strategy": asset_or_strategy,
-            "allocation_bps": allocation_bps,
+            "proposal_id":             pid,
+            "committee_id":            committee_id,
+            "proposer":                proposer,
+            "title":                   title,
+            "summary":                 summary,
+            "asset_or_strategy":       asset_or_strategy,
+            "allocation_bps":          allocation_bps,
             "expected_holding_period": expected_holding_period,
-            "liquidity_profile": liquidity_profile,
-            "risk_thesis": risk_thesis,
-            "fundamental_thesis": fundamental_thesis,
-            "governance_risks": governance_risks,
-            "evidence_urls": evidence_urls,
-            "submitted_at": now,
-            "revised_at": now,
-            "status": "submitted",
+            "liquidity_profile":       liquidity_profile,
+            "risk_thesis":             risk_thesis,
+            "fundamental_thesis":      fundamental_thesis,
+            "governance_risks":        governance_risks,
+            "evidence_urls":           evidence_urls,
+            "submitted_at":            now,
+            "revised_at":              now,
+            "status":                  "submitted",
         }
         self._proposals[str(pid)] = json.dumps(proposal)
 
@@ -289,34 +303,36 @@ class InvestmentCommitteeProtocol(gl.Contract):
         evidence_urls: list,
     ) -> None:
         p = self._load_proposal(proposal_id)
-        assert p["proposer"] == str(gl.message.sender_address), "Only the proposer may revise"
+        assert p["proposer"] == _normalise_addr(gl.message.sender_address), \
+            "Only the proposer may revise"
         c = self._load_committee(p["committee_id"])
-        assert c["status"] == "open_for_proposals", "Revision only allowed while committee is open"
+        assert c["status"] == "open_for_proposals", \
+            "Revision only allowed while committee is open"
         assert _now() < c["proposal_deadline"], "Proposal deadline has passed"
-        assert 6  <= len(title)    <= 120,  "Title must be 6–120 chars"
-        assert 50 <= len(summary)  <= 3000, "Summary must be 50–3000 chars"
-        assert 1  <= len(evidence_urls) <= 8, "Must provide 1–8 evidence URLs"
+        assert 6  <= len(title)   <= 120,  "Title must be 6-120 chars"
+        assert 50 <= len(summary) <= 3000, "Summary must be 50-3000 chars"
+        assert 1 <= len(evidence_urls) <= 8, "Must provide 1-8 evidence URLs"
         for url in evidence_urls:
             assert _validate_url(url), f"Invalid URL: {url}"
 
         p.update({
-            "title": title,
-            "summary": summary,
-            "asset_or_strategy": asset_or_strategy,
-            "allocation_bps": allocation_bps,
+            "title":                   title,
+            "summary":                 summary,
+            "asset_or_strategy":       asset_or_strategy,
+            "allocation_bps":          allocation_bps,
             "expected_holding_period": expected_holding_period,
-            "liquidity_profile": liquidity_profile,
-            "risk_thesis": risk_thesis,
-            "fundamental_thesis": fundamental_thesis,
-            "governance_risks": governance_risks,
-            "evidence_urls": evidence_urls,
-            "revised_at": _now(),
+            "liquidity_profile":       liquidity_profile,
+            "risk_thesis":             risk_thesis,
+            "fundamental_thesis":      fundamental_thesis,
+            "governance_risks":        governance_risks,
+            "evidence_urls":           evidence_urls,
+            "revised_at":              _now(),
         })
         self._proposals[str(proposal_id)] = json.dumps(p)
 
-    # ══════════════════════════════════════════════════════════════════════════
+    # =========================================================================
     # Evaluation methods  (non-deterministic)
-    # ══════════════════════════════════════════════════════════════════════════
+    # =========================================================================
 
     @gl.public.write
     def request_recommendation(self, committee_id: int) -> None:
@@ -329,12 +345,11 @@ class InvestmentCommitteeProtocol(gl.Contract):
         pid_list = self._proposal_ids_for(committee_id)
         assert len(pid_list) > 0, "No proposals to evaluate"
 
-        # Mark as under review immediately (deterministic state change before nondet)
+        # Mark as under review before entering the non-deterministic block
         c["status"] = "under_consensus_review"
         self._committees[str(committee_id)] = json.dumps(c)
 
-        # Build prompt data from storage before entering non-deterministic block.
-        # Storage objects must be read in the deterministic section.
+        # Read all data from storage in the deterministic section
         policy_packet = {
             "dao_name":                      c["dao_name"],
             "treasury_objective":            c["treasury_objective"],
@@ -354,59 +369,74 @@ class InvestmentCommitteeProtocol(gl.Contract):
             if raw != "":
                 proposal_packets.append(json.loads(raw))
 
-        prompt = (
-            "You are evaluating investment proposals for a DAO Investment Committee.\n"
-            "This is NOT a trading signal or price prediction.\n"
-            "Identify which proposal BEST SATISFIES the DAO's stated investment policy.\n\n"
-            f"DAO policy:\n{json.dumps(policy_packet, indent=2)}\n\n"
-            f"Evaluation weights (must sum to 100):\n{json.dumps(evaluation_weights, indent=2)}\n\n"
-            f"Submitted proposals:\n{json.dumps(proposal_packets, indent=2)}\n\n"
-            "Evaluate each proposal against:\n"
-            "1. Treasury objective fit\n"
-            "2. Risk limits and risk appetite\n"
-            "3. Liquidity requirements\n"
-            "4. Fundamentals quality\n"
-            "5. Governance risk\n"
-            "6. Allocation and concentration limits\n"
-            "7. Disallowed asset restrictions\n"
-            "8. Evidence URL relevance\n"
-            "9. Whether no proposal is suitable (all violate policy)\n"
-            "10. Whether proposals are too close to call (tie)\n\n"
-            "Weight your scoring according to evaluation_weights.\n\n"
-            "Return ONLY a JSON object — no markdown, no extra text:\n"
-            "{\n"
-            '  "verdict": "proposal_recommended | no_suitable_proposal | tie_detected | '
-            'insufficient_evidence | policy_violation_detected | manual_review_required",\n'
-            '  "recommended_proposal_id": <integer, or 0 if none>,\n'
-            '  "recommended_proposer": "<proposer address or empty string>",\n'
-            '  "confidence": <integer 0-100>,\n'
-            '  "policy_fit_band": "poor | weak | acceptable | strong | excellent",\n'
-            '  "risk_band": "excessive | high | moderate | low | minimal",\n'
-            '  "liquidity_band": "illiquid | weak | acceptable | strong | excellent",\n'
-            '  "fundamentals_band": "weak | questionable | acceptable | strong | excellent",\n'
-            '  "governance_band": "dangerous | weak | acceptable | strong | excellent",\n'
-            '  "treasury_objective_fit": "misaligned | weak | acceptable | strong | excellent",\n'
-            '  "reason_code": "<short_snake_case>",\n'
-            '  "short_reason": "<max 240 chars>",\n'
-            '  "appeal_allowed": true\n'
-            "}"
-        )
-
-        # ── Non-deterministic block ───────────────────────────────────────────
-        # The leader calls the LLM and proposes a result.
-        # Each validator independently re-runs leader_fn and checks CANONICAL_FIELDS match.
-        # Confidence is allowed to vary within one band (low/medium/high).
+        # ---- Non-deterministic block ----------------------------------------
+        # Leader calls web + LLM. Each validator independently re-runs leader_fn
+        # and verifies that CANONICAL_FIELDS agree before signing the result.
 
         def leader_fn():
-            raw = gl.nondet.exec_prompt(prompt)
-            # Strip markdown code fences if the LLM includes them
-            raw = raw.strip()
-            if raw.startswith("```"):
-                lines = raw.split("\n")
-                raw = "\n".join(lines[1:] if len(lines) > 1 else lines)
-                if raw.endswith("```"):
-                    raw = raw[:-3].strip()
-            return json.loads(raw)
+            # Fetch live evidence for each proposal (cap at 2 URLs to limit latency)
+            enriched = []
+            for p in proposal_packets:
+                ep = dict(p)
+                live_evidence = []
+                for url in p.get('evidence_urls', [])[:2]:
+                    try:
+                        text = gl.nondet.web.render(url, mode='text')
+                        live_evidence.append({
+                            "url": url,
+                            "content": (text or "")[:1200],
+                        })
+                    except Exception:
+                        live_evidence.append({
+                            "url": url,
+                            "content": "FETCH_UNAVAILABLE",
+                        })
+                ep['live_evidence'] = live_evidence
+                enriched.append(ep)
+
+            prompt = (
+                "You are evaluating investment proposals for a DAO treasury committee.\n"
+                "This is a POLICY EVALUATION -- not a price forecast or trading signal.\n"
+                "Identify which proposal best satisfies the DAO's stated investment policy.\n\n"
+                f"DAO Policy:\n{json.dumps(policy_packet, indent=2)}\n\n"
+                f"Evaluation weights (sum to 100):\n{json.dumps(evaluation_weights, indent=2)}\n\n"
+                "Proposals with live evidence fetched from each proposal's evidence_urls:\n"
+                f"{json.dumps(enriched, indent=2)}\n\n"
+                "Evaluate each proposal against:\n"
+                "1. Treasury objective fit\n"
+                "2. Risk appetite compliance (compare risk_appetite and limits)\n"
+                "3. Liquidity requirement compliance\n"
+                "4. Fundamental quality -- use live_evidence to verify claims\n"
+                "5. Governance risk\n"
+                "6. Allocation limit compliance (allocation_bps vs max_single_asset_exposure_bps)\n"
+                "7. Disallowed asset compliance\n"
+                "8. Evidence credibility (FETCH_UNAVAILABLE reduces confidence)\n"
+                "9. Is any proposal suitable? Or do all violate policy?\n"
+                "10. Are the top proposals too close to rank? (tie)\n\n"
+                "Apply evaluation_weights across criteria.\n"
+                "When live_evidence content is available, use it to verify or challenge "
+                "claims made in the proposal text.\n\n"
+                "Return a JSON object (no markdown, no extra text):\n"
+                '{"verdict":"proposal_recommended|no_suitable_proposal|tie_detected|'
+                'insufficient_evidence|policy_violation_detected|manual_review_required",'
+                '"recommended_proposal_id":<int, 0 if none>,'
+                '"recommended_proposer":"<address or empty string>",'
+                '"confidence":<int 0-100>,'
+                '"policy_fit_band":"poor|weak|acceptable|strong|excellent",'
+                '"risk_band":"excessive|high|moderate|low|minimal",'
+                '"liquidity_band":"illiquid|weak|acceptable|strong|excellent",'
+                '"fundamentals_band":"weak|questionable|acceptable|strong|excellent",'
+                '"governance_band":"dangerous|weak|acceptable|strong|excellent",'
+                '"treasury_objective_fit":"misaligned|weak|acceptable|strong|excellent",'
+                '"reason_code":"<short_snake_case>",'
+                '"short_reason":"<max 240 chars>",'
+                '"appeal_allowed":true}'
+            )
+
+            result = gl.nondet.exec_prompt(prompt, response_format='json')
+            if not isinstance(result, dict):
+                raise gl.vm.UserError("LLM_ERROR: evaluator did not return a JSON object")
+            return result
 
         def validator_fn(leader_result) -> bool:
             if not isinstance(leader_result, gl.vm.Return):
@@ -414,37 +444,35 @@ class InvestmentCommitteeProtocol(gl.Contract):
             leader_data = leader_result.calldata
             if not isinstance(leader_data, dict):
                 return False
-
-            validator_data = leader_fn()
+            try:
+                validator_data = leader_fn()
+            except Exception:
+                return False
             if not isinstance(validator_data, dict):
                 return False
-
-            # Strict equality on all canonical fields
             for field in CANONICAL_FIELDS:
                 if leader_data.get(field) != validator_data.get(field):
                     return False
-
-            # Confidence must be in the same band (low/medium/high)
             l_band = _confidence_band(int(leader_data.get("confidence", 0)))
             v_band = _confidence_band(int(validator_data.get("confidence", 0)))
             return l_band == v_band
 
         result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
-        # ── Validate and store ────────────────────────────────────────────────
+        # ---- Validate and store --------------------------------------------
         assert isinstance(result, dict), "LLM result must be a JSON object"
         assert result.get("verdict") in VALID_VERDICTS, \
             f"Invalid verdict: {result.get('verdict')}"
-        assert result.get("policy_fit_band")       in VALID_POLICY_FIT_BANDS,   "Bad policy_fit_band"
-        assert result.get("risk_band")             in VALID_RISK_BANDS,          "Bad risk_band"
-        assert result.get("liquidity_band")        in VALID_LIQUIDITY_BANDS,     "Bad liquidity_band"
-        assert result.get("fundamentals_band")     in VALID_FUNDAMENTALS_BANDS,  "Bad fundamentals_band"
-        assert result.get("governance_band")       in VALID_GOVERNANCE_BANDS,    "Bad governance_band"
-        assert result.get("treasury_objective_fit") in VALID_OBJECTIVE_BANDS,   "Bad treasury_objective_fit"
+        assert result.get("policy_fit_band")        in VALID_POLICY_FIT_BANDS,   "Bad policy_fit_band"
+        assert result.get("risk_band")              in VALID_RISK_BANDS,          "Bad risk_band"
+        assert result.get("liquidity_band")         in VALID_LIQUIDITY_BANDS,     "Bad liquidity_band"
+        assert result.get("fundamentals_band")      in VALID_FUNDAMENTALS_BANDS,  "Bad fundamentals_band"
+        assert result.get("governance_band")        in VALID_GOVERNANCE_BANDS,    "Bad governance_band"
+        assert result.get("treasury_objective_fit") in VALID_OBJECTIVE_BANDS,     "Bad treasury_objective_fit"
         confidence = int(result.get("confidence", -1))
-        assert 0 <= confidence <= 100, "Confidence must be 0–100"
+        assert 0 <= confidence <= 100, "Confidence must be 0-100"
         short_reason = str(result.get("short_reason", ""))
-        assert len(short_reason) <= 240, "short_reason must be ≤ 240 chars"
+        assert len(short_reason) <= 240, "short_reason must be <= 240 chars"
 
         now = _now()
         recommendation = {
@@ -495,15 +523,15 @@ class InvestmentCommitteeProtocol(gl.Contract):
 
         self._appeal_counter = u64(int(self._appeal_counter) + 1)
         appeal = {
-            "appeal_id":    int(self._appeal_counter),
-            "committee_id": committee_id,
-            "filed_by":     str(gl.message.sender_address),
-            "basis":        basis,
-            "statement":    statement,
+            "appeal_id":     int(self._appeal_counter),
+            "committee_id":  committee_id,
+            "filed_by":      _normalise_addr(gl.message.sender_address),
+            "basis":         basis,
+            "statement":     statement,
             "evidence_urls": evidence_urls,
-            "status":       "filed",
-            "result":       {},
-            "created_at":   _now(),
+            "status":        "filed",
+            "result":        {},
+            "created_at":    _now(),
         }
         self._appeals[str(committee_id)] = json.dumps(appeal)
 
@@ -541,43 +569,57 @@ class InvestmentCommitteeProtocol(gl.Contract):
             "governance_constraints":        c["governance_constraints"],
         }
 
-        prompt = (
-            "You are reviewing an appeal against a DAO Investment Committee recommendation.\n\n"
-            f"Original recommendation:\n{json.dumps(rec, indent=2)}\n\n"
-            f"Appeal basis: {appeal['basis']}\n"
-            f"Appeal statement: {appeal['statement']}\n"
-            f"Appeal evidence URLs: {json.dumps(appeal['evidence_urls'])}\n\n"
-            f"DAO policy:\n{json.dumps(policy_packet, indent=2)}\n\n"
-            f"All submitted proposals:\n{json.dumps(proposal_packets, indent=2)}\n\n"
-            "Evaluate:\n"
-            "1. Does the appeal introduce meaningful new evidence?\n"
-            "2. Was risk interpreted incorrectly?\n"
-            "3. Was liquidity misread?\n"
-            "4. Was governance risk overlooked?\n"
-            "5. Was the DAO policy misapplied?\n"
-            "6. Should the recommendation change?\n\n"
-            f"The appeal basis '{appeal['basis']}' must be given careful weight.\n\n"
-            "Return ONLY a JSON object — no markdown, no extra text:\n"
-            "{\n"
-            '  "appeal_verdict": "appeal_granted | appeal_rejected | manual_review_required",\n'
-            '  "final_recommendation_changed": <true or false>,\n'
-            '  "new_recommended_proposal_id": <proposal_id or 0 if unchanged>,\n'
-            '  "confidence": <integer 0-100>,\n'
-            '  "reason_code": "<short_snake_case>",\n'
-            '  "short_reason": "<max 240 chars>"\n'
-            "}"
-        )
+        appeal_basis = appeal['basis']
+        appeal_stmt  = appeal['statement']
+        appeal_urls  = appeal['evidence_urls']
 
-        # ── Non-deterministic appeal review ───────────────────────────────────
         def leader_fn():
-            raw = gl.nondet.exec_prompt(prompt)
-            raw = raw.strip()
-            if raw.startswith("```"):
-                lines = raw.split("\n")
-                raw = "\n".join(lines[1:] if len(lines) > 1 else lines)
-                if raw.endswith("```"):
-                    raw = raw[:-3].strip()
-            return json.loads(raw)
+            # Fetch new evidence submitted with the appeal
+            appeal_evidence = []
+            for url in appeal_urls[:2]:
+                try:
+                    text = gl.nondet.web.render(url, mode='text')
+                    appeal_evidence.append({
+                        "url": url,
+                        "content": (text or "")[:1200],
+                    })
+                except Exception:
+                    appeal_evidence.append({
+                        "url": url,
+                        "content": "FETCH_UNAVAILABLE",
+                    })
+
+            prompt = (
+                "You are reviewing an appeal against a DAO Investment Committee recommendation.\n\n"
+                f"Original recommendation:\n{json.dumps(rec, indent=2)}\n\n"
+                f"Appeal basis: {appeal_basis}\n"
+                f"Appeal statement: {appeal_stmt}\n\n"
+                "Appeal evidence (fetched from submitted URLs):\n"
+                f"{json.dumps(appeal_evidence, indent=2)}\n\n"
+                f"DAO policy:\n{json.dumps(policy_packet, indent=2)}\n\n"
+                f"All submitted proposals:\n{json.dumps(proposal_packets, indent=2)}\n\n"
+                "Evaluate:\n"
+                "1. Does the appeal introduce meaningful new evidence or arguments?\n"
+                "2. Was risk misinterpreted in the original recommendation?\n"
+                "3. Was liquidity misread?\n"
+                "4. Was governance risk overlooked?\n"
+                "5. Was the DAO policy misapplied?\n"
+                "6. Should the recommendation change?\n\n"
+                f"The appeal basis '{appeal_basis}' must be given careful weight.\n"
+                "Use the fetched appeal_evidence content where available.\n\n"
+                "Return a JSON object (no markdown, no extra text):\n"
+                '{"appeal_verdict":"appeal_granted|appeal_rejected|manual_review_required",'
+                '"final_recommendation_changed":<true or false>,'
+                '"new_recommended_proposal_id":<proposal_id or 0 if unchanged>,'
+                '"confidence":<int 0-100>,'
+                '"reason_code":"<short_snake_case>",'
+                '"short_reason":"<max 240 chars>"}'
+            )
+
+            result = gl.nondet.exec_prompt(prompt, response_format='json')
+            if not isinstance(result, dict):
+                raise gl.vm.UserError("LLM_ERROR: appeal reviewer did not return a JSON object")
+            return result
 
         def validator_fn(leader_result) -> bool:
             if not isinstance(leader_result, gl.vm.Return):
@@ -585,10 +627,12 @@ class InvestmentCommitteeProtocol(gl.Contract):
             leader_data = leader_result.calldata
             if not isinstance(leader_data, dict):
                 return False
-            validator_data = leader_fn()
+            try:
+                validator_data = leader_fn()
+            except Exception:
+                return False
             if not isinstance(validator_data, dict):
                 return False
-            # appeal_verdict and changed flag must agree; new proposal must agree if changed
             if leader_data.get("appeal_verdict") != validator_data.get("appeal_verdict"):
                 return False
             if leader_data.get("final_recommendation_changed") != validator_data.get("final_recommendation_changed"):
@@ -609,7 +653,6 @@ class InvestmentCommitteeProtocol(gl.Contract):
         appeal["status"] = "reviewed"
         self._appeals[str(committee_id)] = json.dumps(appeal)
 
-        # If the appeal is granted and the recommendation changed, update it
         if (
             appeal_result.get("appeal_verdict") == "appeal_granted"
             and appeal_result.get("final_recommendation_changed")
@@ -646,9 +689,9 @@ class InvestmentCommitteeProtocol(gl.Contract):
         c["finalized"] = True
         self._committees[str(committee_id)] = json.dumps(c)
 
-    # ══════════════════════════════════════════════════════════════════════════
+    # =========================================================================
     # Read methods
-    # ══════════════════════════════════════════════════════════════════════════
+    # =========================================================================
 
     @gl.public.view
     def get_committee(self, committee_id: int) -> dict:
@@ -681,7 +724,8 @@ class InvestmentCommitteeProtocol(gl.Contract):
 
     @gl.public.view
     def get_committees_by_dao(self, address: str) -> list:
-        cids = json.loads(self._committees_by_dao.get(address, "[]"))
+        norm = _normalise_addr(address)
+        cids = json.loads(self._committees_by_dao.get(norm, "[]"))
         result = []
         for cid in cids:
             raw = self._committees.get(str(cid), "")
@@ -691,7 +735,8 @@ class InvestmentCommitteeProtocol(gl.Contract):
 
     @gl.public.view
     def get_proposals_by_proposer(self, address: str) -> list:
-        pids = json.loads(self._proposals_by_proposer.get(address, "[]"))
+        norm = _normalise_addr(address)
+        pids = json.loads(self._proposals_by_proposer.get(norm, "[]"))
         result = []
         for pid in pids:
             raw = self._proposals.get(str(pid), "")

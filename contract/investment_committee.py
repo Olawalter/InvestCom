@@ -40,12 +40,6 @@ VALID_OBJECTIVE_BANDS    = {"misaligned", "weak", "acceptable", "strong", "excel
 CANONICAL_FIELDS = [
     "verdict",
     "recommended_proposal_id",
-    "policy_fit_band",
-    "risk_band",
-    "liquidity_band",
-    "fundamentals_band",
-    "governance_band",
-    "treasury_objective_fit",
 ]
 
 
@@ -453,9 +447,7 @@ class InvestmentCommitteeProtocol(gl.Contract):
             for field in CANONICAL_FIELDS:
                 if leader_data.get(field) != validator_data.get(field):
                     return False
-            l_band = _confidence_band(int(leader_data.get("confidence", 0)))
-            v_band = _confidence_band(int(validator_data.get("confidence", 0)))
-            return l_band == v_band
+            return True
 
         result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 

@@ -44,12 +44,6 @@ Only these fields must agree between validators. Free-form text fields (`short_r
 CANONICAL_FIELDS = [
     "verdict",
     "recommended_proposal_id",
-    "policy_fit_band",
-    "risk_band",
-    "liquidity_band",
-    "fundamentals_band",
-    "governance_band",
-    "treasury_objective_fit",
 ]
 ```
 
@@ -143,7 +137,7 @@ NEXT_PUBLIC_CHAIN_NAME=GenLayer StudioNet
 NEXT_PUBLIC_CHAIN_ID=61999
 NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
 NEXT_PUBLIC_GENLAYER_EXPLORER_URL=https://explorer-studio.genlayer.com
-NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=0xDFB545bAd8dF87be93B882DB47F8dab81191163E
+NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=0x3d69DD001d0E8cffBDb9268Fdd7c86C30E1b7b79
 ```
 
 ### Run the dev server

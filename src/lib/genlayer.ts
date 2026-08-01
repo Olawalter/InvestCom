@@ -3,12 +3,14 @@ import { studionet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
 import { encodeFunctionData, type Address, type Hex } from "viem";
 
-// GenLayer's gen_call RPC requires lowercase hex addresses; EIP-55 checksummed
-// addresses are rejected. Keep a separate lowercase alias for all readContract
-// calls while the checksummed form is used for viem's encodeFunctionData.
 const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS ?? "") as Address;
-const CONTRACT_ADDRESS_LC = CONTRACT_ADDRESS.toLowerCase() as Address;
 const EXPLORER_URL = process.env.NEXT_PUBLIC_GENLAYER_EXPLORER_URL ?? "https://explorer-studio.genlayer.com";
+
+// Read-only client with no wallet provider — routes directly to the GenLayer
+// HTTP transport. When a wallet provider is attached, genlayer-js routes reads
+// through the injected wallet (MetaMask/Rabby) which rejects gen_call requests.
+// All readContract calls must use this client; only writes use the wallet client.
+const READ_CLIENT = createClient({ chain: studionet } as Parameters<typeof createClient>[0]);
 
 // â”€â”€â”€ Client factory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -131,64 +133,64 @@ async function sendWrite(
 // â”€â”€â”€ Read calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function getAllCommittees(client: ReturnType<typeof createClient>) {
-  return client.readContract({
-    address: CONTRACT_ADDRESS_LC,
+  return READ_CLIENT.readContract({
+    address: CONTRACT_ADDRESS,
     functionName: "get_all_committees",
     args: [],
   });
 }
 
 export async function getCommittee(client: ReturnType<typeof createClient>, committeeId: number) {
-  return client.readContract({
-    address: CONTRACT_ADDRESS_LC,
+  return READ_CLIENT.readContract({
+    address: CONTRACT_ADDRESS,
     functionName: "get_committee",
     args: [committeeId],
   });
 }
 
 export async function getCommitteeProposals(client: ReturnType<typeof createClient>, committeeId: number) {
-  return client.readContract({
-    address: CONTRACT_ADDRESS_LC,
+  return READ_CLIENT.readContract({
+    address: CONTRACT_ADDRESS,
     functionName: "get_committee_proposals",
     args: [committeeId],
   });
 }
 
 export async function getProposal(client: ReturnType<typeof createClient>, proposalId: number) {
-  return client.readContract({
-    address: CONTRACT_ADDRESS_LC,
+  return READ_CLIENT.readContract({
+    address: CONTRACT_ADDRESS,
     functionName: "get_proposal",
     args: [proposalId],
   });
 }
 
 export async function getRecommendationResult(client: ReturnType<typeof createClient>, committeeId: number) {
-  return client.readContract({
-    address: CONTRACT_ADDRESS_LC,
+  return READ_CLIENT.readContract({
+    address: CONTRACT_ADDRESS,
     functionName: "get_recommendation_result",
     args: [committeeId],
   });
 }
 
 export async function getAppeal(client: ReturnType<typeof createClient>, committeeId: number) {
-  return client.readContract({
-    address: CONTRACT_ADDRESS_LC,
+  return READ_CLIENT.readContract({
+    address: CONTRACT_ADDRESS,
     functionName: "get_appeal",
     args: [committeeId],
   });
 }
 
 export async function getCommitteesByDao(client: ReturnType<typeof createClient>, address: string) {
-  return client.readContract({
-    address: CONTRACT_ADDRESS_LC,
+  return READ_CLIENT.readContract({
+    address: CONTRACT_ADDRESS,
     functionName: "get_committees_by_dao",
     args: [address],
   });
 }
 
 export async function getProposalsByProposer(client: ReturnType<typeof createClient>, address: string) {
-  return client.readContract({
-    address: CONTRACT_ADDRESS_LC,
+  return READ_CLIENT.readContract({
+    address: CONTRACT_ADDRESS,
     functionName: "get_proposals_by_proposer",
     args: [address],
   });
@@ -324,5 +326,6 @@ export async function requestAppealReview(client: ReturnType<typeof createClient
 export async function finalizeRecommendation(client: ReturnType<typeof createClient>, committeeId: number) {
   return sendWrite(client, "finalize_recommendation", [committeeId]);
 }
+
 
 

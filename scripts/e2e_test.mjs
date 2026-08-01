@@ -20,17 +20,36 @@ const CONTRACT = "0x848ceD2E9e07d69DA133cd425c643B41E43fBf18";
 const RPC      = "https://studio.genlayer.com/api";
 const EXPLORER = "https://explorer-studio.genlayer.com";
 
-// Keys from environment — set E2E_KEY_DAO, E2E_KEY_W2, E2E_KEY_W3 before running.
-// Example:
-//   E2E_KEY_DAO=0x... E2E_KEY_W2=0x... E2E_KEY_W3=0x... node scripts/e2e_test.mjs
+// Keys from environment.
+// Single-key mode:  E2E_KEY_DAO=0x...  (wallet2/wallet3 fall back to DAO key)
+// Multi-key mode:   E2E_KEY_DAO=0x... E2E_KEY_W2=0x... E2E_KEY_W3=0x...
 function requireEnv(name) {
   const v = process.env[name];
   if (!v) { console.error(`Missing env var: ${name}`); process.exit(1); }
   return v;
 }
-const dao     = createAccount(requireEnv("E2E_KEY_DAO"));
-const wallet2 = createAccount(requireEnv("E2E_KEY_W2"));
-const wallet3 = createAccount(requireEnv("E2E_KEY_W3"));
+const daoKey = requireEnv("E2E_KEY_DAO");
+const dao     = createAccount(daoKey);
+const wallet2 = createAccount(process.env.E2E_KEY_W2 ?? daoKey);
+const wallet3 = createAccount(process.env.E2E_KEY_W3 ?? daoKey);
+
+// ─── Nonce manager ────────────────────────────────────────────────────────────
+// When all wallets share the same address, parallel sendWrite calls race on the
+// same nonce. We fetch the nonce once and increment synchronously — safe because
+// JS is single-threaded and the increment has no await between read and write.
+const _nonceMap  = {};
+const _nonceInit = {};
+async function getNextNonce(address) {
+  if (_nonceMap[address] === undefined) {
+    // Deduplicate concurrent init calls — all waiters share one fetch
+    if (!_nonceInit[address]) {
+      _nonceInit[address] = jsonRpc("eth_getTransactionCount", [address, "latest"])
+        .then(hex => { _nonceMap[address] = parseInt(hex, 16); });
+    }
+    await _nonceInit[address];
+  }
+  return _nonceMap[address]++;
+}
 
 const readClient = createClient({ chain: studionet });
 
@@ -81,7 +100,7 @@ async function sendWrite(account, functionName, callArgs) {
     gas = BigInt(gasHex) + BigInt(10000);
   } catch { /* fallback */ }
 
-  const nonce  = parseInt(await jsonRpc("eth_getTransactionCount", [account.address, "latest"]), 16);
+  const nonce  = await getNextNonce(account.address);
   const gpHex  = await jsonRpc("eth_gasPrice", []);
   const signed = await account.signTransaction({
     account, to: consensus.address, data: evmData,

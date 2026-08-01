@@ -25,12 +25,12 @@ export default function CreateCommitteePage() {
     liquidity_requirement: "",
     max_single_asset_exposure_bps: 2000,
     max_protocol_exposure_bps: 1500,
-    allowed_asset_classes: ["stablecoins", "ETH", "BTC"],
-    disallowed_assets: ["microcaps", "anonymous-team-assets"],
+    allowed_asset_classes: [] as string[],
+    disallowed_assets: [] as string[],
     governance_constraints: "",
     evaluation_weights: { risk: 30, liquidity: 25, fundamentals: 20, governance: 15, treasury_objective_fit: 10 },
-    proposal_deadline_minutes: 10,
-    appeal_window_hours: 1,
+    proposal_deadline_minutes: 60,
+    appeal_window_hours: 24,
   });
 
   const [newAllowed, setNewAllowed] = useState("");
@@ -281,7 +281,7 @@ export default function CreateCommitteePage() {
 
         {/* Deadline */}
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Proposal Window (minutes)" hint="Min 5 — use 10 for testing">
+          <Field label="Proposal Window (minutes)" hint="Min 5 — 60 for quick testing, 1440+ for production">
             <input
               type="number"
               className="input-field"
@@ -290,7 +290,7 @@ export default function CreateCommitteePage() {
               min={5} max={129600}
             />
           </Field>
-          <Field label="Appeal Window (hours)" hint="Min 1 — use 1 for testing">
+          <Field label="Appeal Window (hours)" hint="Min 1 — 24 for standard, 1 for quick testing">
             <input
               type="number"
               className="input-field"

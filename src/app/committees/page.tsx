@@ -3,24 +3,30 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/context/WalletContext";
-import { getAllCommittees } from "@/lib/genlayer";
+import { getAllCommittees, getCommitteeCount } from "@/lib/genlayer";
 import type { InvestmentCommittee } from "@/lib/types";
 import { statusLabel, statusColor, formatDate, truncate } from "@/lib/utils";
-import { Plus, Loader2, RefreshCw, ArrowRight, Users } from "lucide-react";
+import { Plus, Loader2, RefreshCw, ArrowRight } from "lucide-react";
 
 export default function CommitteesPage() {
   const { client } = useWallet();
   const [committees, setCommittees] = useState<InvestmentCommittee[]>([]);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
-    if (!client) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await getAllCommittees(client);
+      // directRead doesn't need a connected wallet — pass null safely
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const [data, count] = await Promise.all([
+        getAllCommittees(null as any),
+        getCommitteeCount(),
+      ]);
       setCommittees((data as unknown as InvestmentCommittee[]).reverse());
+      setTotalCount(count as unknown as number);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load committees");
     } finally {
@@ -28,7 +34,7 @@ export default function CommitteesPage() {
     }
   }
 
-  useEffect(() => { load(); }, [client]);
+  useEffect(() => { load(); }, []);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
@@ -36,7 +42,14 @@ export default function CommitteesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-3xl font-bold text-paper-white">Committee Board</h1>
-          <p className="text-slate-grey mt-1">DAO treasury investment committees on GenLayer</p>
+          <p className="text-slate-grey mt-1">
+            DAO treasury investment committees on GenLayer
+            {totalCount !== null && (
+              <span className="ml-2 font-mono text-xs bg-white/5 border border-white/10 text-paper-white px-2 py-0.5 rounded-full">
+                {totalCount} on-chain
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -56,15 +69,7 @@ export default function CommitteesPage() {
         </div>
       </div>
 
-      {!client && (
-        <div className="panel p-8 text-center space-y-3">
-          <Users size={32} className="text-slate-grey mx-auto" />
-          <p className="text-paper-white font-display font-semibold">Connect your wallet to view committees</p>
-          <p className="text-slate-grey text-sm">Committees are loaded directly from the GenLayer contract.</p>
-        </div>
-      )}
-
-      {client && loading && !committees.length && (
+      {loading && !committees.length && (
         <div className="panel p-12 flex items-center justify-center gap-3 text-slate-grey">
           <Loader2 className="animate-spin" size={20} />
           <span>Loading committees from contract…</span>
@@ -75,7 +80,7 @@ export default function CommitteesPage() {
         <div className="panel border-risk-red/30 p-4 text-risk-red text-sm">{error}</div>
       )}
 
-      {!loading && !error && client && committees.length === 0 && (
+      {!loading && !error && committees.length === 0 && (
         <div className="panel p-12 text-center space-y-4">
           <p className="font-display text-lg text-paper-white">No committees yet</p>
           <p className="text-slate-grey text-sm">Be the first to create an investment committee for your DAO.</p>

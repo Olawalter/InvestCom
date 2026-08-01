@@ -245,6 +245,8 @@ class InvestmentCommitteeProtocol(gl.Contract):
             assert _validate_url(url), f"Invalid URL: {url}"
         assert allocation_bps <= c["max_single_asset_exposure_bps"], \
             f"Allocation exceeds max single asset exposure ({c['max_single_asset_exposure_bps']} bps)"
+        assert allocation_bps <= c["max_protocol_exposure_bps"], \
+            f"Allocation exceeds max protocol exposure ({c['max_protocol_exposure_bps']} bps)"
 
         self._proposal_counter = u64(int(self._proposal_counter) + 1)
         pid      = int(self._proposal_counter)

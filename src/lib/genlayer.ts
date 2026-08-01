@@ -307,6 +307,10 @@ export async function getProposalsByProposer(_client: ReturnType<typeof createCl
   return directRead("get_proposals_by_proposer", [address]);
 }
 
+export async function getCommitteeCount() {
+  return directRead("get_committee_count") as Promise<number>;
+}
+
 // â”€â”€â”€ Write calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function createCommittee(

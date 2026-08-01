@@ -114,7 +114,8 @@ export default function ProfilePage() {
 
         {!loading && committees.length === 0 && (
           <div className="panel p-8 text-center space-y-3">
-            <p className="text-slate-grey">You haven&apos;t created any committees yet.</p>
+            <p className="text-slate-grey">No committees created from this address.</p>
+            <p className="text-xs text-slate-grey/60">Committees created by this wallet will appear here. Connect a wallet that has called <span className="font-mono">create_committee</span> on the contract to see its history.</p>
             <Link href="/committees/create" className="text-sm text-committee-blue hover:text-signal-cyan transition-colors">
               Create your first committee →
             </Link>
@@ -155,7 +156,8 @@ export default function ProfilePage() {
 
         {!loading && proposals.length === 0 && (
           <div className="panel p-8 text-center space-y-2">
-            <p className="text-slate-grey">You haven&apos;t submitted any proposals yet.</p>
+            <p className="text-slate-grey">No proposals submitted from this address.</p>
+            <p className="text-xs text-slate-grey/60">Proposals submitted by this wallet across all committees appear here.</p>
             <Link href="/committees" className="text-sm text-committee-blue hover:text-signal-cyan transition-colors">
               Browse open committees →
             </Link>

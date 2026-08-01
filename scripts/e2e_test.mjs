@@ -16,7 +16,7 @@ import { encodeFunctionData } from "viem";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const CONTRACT = "0x7808f162dDC659da3587283d283C5eBA443b2130";
+const CONTRACT = "0x2f1314d964BE073f38F4E13E22a54665Be99a9aa";
 const RPC      = "https://studio.genlayer.com/api";
 const EXPLORER = "https://explorer-studio.genlayer.com";
 

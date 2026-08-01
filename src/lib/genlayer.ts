@@ -51,7 +51,10 @@ function _encodeVal(out: number[], v: unknown) {
       .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
     _writeVarInt(out, (BigInt(entries.length) << BigInt(_BITS)) | BigInt(_T.MAP));
     for (const [k, val] of entries) {
-      _encodeVal(out, k);
+      // MAP keys are raw byte strings: just length varint + bytes (no type tag)
+      const kb = new TextEncoder().encode(k);
+      _writeVarInt(out, BigInt(kb.length));
+      for (const b of kb) out.push(b);
       _encodeVal(out, val);
     }
     return;
@@ -111,10 +114,14 @@ function _decodeVal(buf: Uint8Array, pos: number): [unknown, number] {
       const len = Number(payload);
       const obj: Record<string, unknown> = {};
       for (let i = 0; i < len; i++) {
-        let k: unknown, v: unknown;
-        [k, pos] = _decodeVal(buf, pos);
+        // MAP keys are raw byte strings: just length varint + bytes (no type tag)
+        let keyLen: bigint;
+        [keyLen, pos] = _readVarInt(buf, pos);
+        const k = new TextDecoder().decode(buf.slice(pos, pos + Number(keyLen)));
+        pos += Number(keyLen);
+        let v: unknown;
         [v, pos] = _decodeVal(buf, pos);
-        obj[String(k)] = v;
+        obj[k] = v;
       }
       return [obj, pos];
     }

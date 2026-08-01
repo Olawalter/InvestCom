@@ -6,41 +6,40 @@ import { useWallet } from "@/context/WalletContext";
 import { getAllCommittees, getCommitteeProposals } from "@/lib/genlayer";
 import type { InvestmentCommittee, InvestmentProposal } from "@/lib/types";
 import { statusLabel, statusColor, formatDate, formatAddress, truncate } from "@/lib/utils";
-import { Loader2, Wallet, Building2, FileText, ArrowRight } from "lucide-react";
+import { Loader2, Wallet, Building2, FileText, ArrowRight, Activity } from "lucide-react";
 
 export default function ProfilePage() {
   const { client, address, connect, connecting } = useWallet();
 
   const [committees, setCommittees] = useState<InvestmentCommittee[]>([]);
   const [proposals, setProposals] = useState<InvestmentProposal[]>([]);
+  const [allCommittees, setAllCommittees] = useState<InvestmentCommittee[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     async function load() {
-      if (!client || !address) return;
       setLoading(true);
       try {
-        // Compare addresses in a format-agnostic way: strip 0x prefix and lowercase both sides.
-        // GenLayer Python str(gl.message.sender_address) may produce a different case or omit
-        // the 0x prefix vs. what an EIP-55 wallet returns, so index-based lookups (TreeMap key
-        // exact match) are unreliable. Fetching all and filtering client-side is always correct.
-        const norm = (a: string) => a.toLowerCase().replace(/^0x/, "");
-        const myAddr = norm(address);
+        const all = (await getAllCommittees(null as any)) as unknown as InvestmentCommittee[];
+        setAllCommittees(all);
 
-        const allCommittees = (await getAllCommittees(client)) as unknown as InvestmentCommittee[];
-        const daoCommittees = allCommittees.filter((c) => norm(c.dao ?? "") === myAddr);
-        setCommittees(daoCommittees);
+        if (address) {
+          // Compare addresses in a format-agnostic way: strip 0x prefix and lowercase both sides.
+          const norm = (a: string) => a.toLowerCase().replace(/^0x/, "");
+          const myAddr = norm(address);
 
-        // Fetch proposals from every committee in parallel; filter by proposer client-side.
-        const propArrays = await Promise.all(
-          allCommittees.map((c) =>
-            getCommitteeProposals(client, c.committee_id)
-              .then((p) => p as unknown as InvestmentProposal[])
-              .catch(() => [] as InvestmentProposal[])
-          )
-        );
-        const myProposals = propArrays.flat().filter((p) => norm(p.proposer ?? "") === myAddr);
-        setProposals(myProposals);
+          setCommittees(all.filter((c) => norm(c.dao ?? "") === myAddr));
+
+          // Fetch proposals from every committee in parallel; filter by proposer client-side.
+          const propArrays = await Promise.all(
+            all.map((c) =>
+              getCommitteeProposals(null as any, c.committee_id)
+                .then((p) => p as unknown as InvestmentProposal[])
+                .catch(() => [] as InvestmentProposal[])
+            )
+          );
+          setProposals(propArrays.flat().filter((p) => norm(p.proposer ?? "") === myAddr));
+        }
       } catch {
         // silently fail
       } finally {
@@ -48,24 +47,64 @@ export default function ProfilePage() {
       }
     }
     load();
-  }, [client, address]);
+  }, [address]);
 
   if (!address) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-20 text-center space-y-6">
-        <div className="w-16 h-16 rounded-2xl bg-committee-blue/10 border border-committee-blue/30 flex items-center justify-center mx-auto">
-          <Wallet size={28} className="text-committee-blue" />
+      <div className="max-w-4xl mx-auto px-4 py-10 space-y-10">
+        {/* Connect prompt */}
+        <div className="panel p-10 text-center space-y-5">
+          <div className="w-16 h-16 rounded-2xl bg-committee-blue/10 border border-committee-blue/30 flex items-center justify-center mx-auto">
+            <Wallet size={28} className="text-committee-blue" />
+          </div>
+          <h1 className="font-display text-3xl font-bold text-paper-white">DAO & Proposer Dashboard</h1>
+          <p className="text-slate-grey max-w-sm mx-auto">Connect your wallet to see committees you&apos;ve created and proposals you&apos;ve submitted.</p>
+          <button
+            onClick={() => connect()}
+            disabled={connecting}
+            className="px-6 py-3 bg-committee-blue hover:bg-committee-blue/80 text-white font-display font-semibold rounded-xl transition-all disabled:opacity-50 flex items-center gap-2 mx-auto"
+          >
+            {connecting ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />}
+            Connect Wallet
+          </button>
         </div>
-        <h1 className="font-display text-3xl font-bold text-paper-white">DAO & Proposer Dashboard</h1>
-        <p className="text-slate-grey">Connect your wallet to view your committees and proposals.</p>
-        <button
-          onClick={() => connect()}
-          disabled={connecting}
-          className="px-6 py-3 bg-committee-blue hover:bg-committee-blue/80 text-white font-display font-semibold rounded-xl transition-all disabled:opacity-50 flex items-center gap-2 mx-auto"
-        >
-          {connecting ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />}
-          Connect Wallet
-        </button>
+
+        {/* Protocol activity visible to everyone */}
+        <div className="space-y-4">
+          <h2 className="font-display text-xl font-bold text-paper-white flex items-center gap-2">
+            <Activity size={18} className="text-signal-cyan" />
+            Recent Protocol Activity
+          </h2>
+          {loading && (
+            <div className="flex items-center gap-3 text-slate-grey">
+              <Loader2 className="animate-spin" size={16} />
+              <span>Loading…</span>
+            </div>
+          )}
+          {!loading && allCommittees.length === 0 && (
+            <div className="panel p-6 text-center text-slate-grey text-sm">No committees found on-chain yet.</div>
+          )}
+          <div className="space-y-3">
+            {allCommittees.slice().reverse().map((c) => (
+              <Link
+                key={c.committee_id}
+                href={`/committees/${c.committee_id}`}
+                className="panel p-4 flex items-center justify-between gap-4 hover:border-committee-blue/40 transition-all group"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="font-display font-semibold text-paper-white text-sm group-hover:text-signal-cyan transition-colors">
+                    {c.dao_name}
+                  </p>
+                  <p className="text-xs text-slate-grey mt-0.5">Committee #{c.committee_id}</p>
+                </div>
+                <span className={`band-pill border bg-transparent ${statusColor(c.status)} border-current flex-shrink-0`}>
+                  {statusLabel(c.status)}
+                </span>
+                <ArrowRight size={14} className="text-slate-grey group-hover:text-signal-cyan transition-colors flex-shrink-0" />
+              </Link>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -184,6 +223,36 @@ export default function ProfilePage() {
           ))}
         </div>
       </div>
+
+      {/* All protocol committees — visible regardless of wallet */}
+      {allCommittees.length > committees.length && (
+        <div className="space-y-4">
+          <h2 className="font-display text-xl font-bold text-paper-white flex items-center gap-2">
+            <Activity size={18} className="text-signal-cyan" />
+            All Protocol Committees
+          </h2>
+          <div className="space-y-3">
+            {allCommittees.slice().reverse().map((c) => (
+              <Link
+                key={c.committee_id}
+                href={`/committees/${c.committee_id}`}
+                className="panel p-4 flex items-center justify-between gap-4 hover:border-committee-blue/40 transition-all group"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="font-display font-semibold text-paper-white text-sm group-hover:text-signal-cyan transition-colors">
+                    {c.dao_name}
+                  </p>
+                  <p className="text-xs text-slate-grey mt-0.5">Committee #{c.committee_id}</p>
+                </div>
+                <span className={`band-pill border bg-transparent ${statusColor(c.status)} border-current flex-shrink-0`}>
+                  {statusLabel(c.status)}
+                </span>
+                <ArrowRight size={14} className="text-slate-grey group-hover:text-signal-cyan transition-colors flex-shrink-0" />
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

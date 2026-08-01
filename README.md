@@ -265,12 +265,14 @@ Wallet support is pure EIP-6963 — no hardcoded wallet SDK.
 
 GenLayer StudioNet returns empty on `eth_getTransactionReceipt`, so genlayer-js's default write path hangs indefinitely. All write calls go through a custom `sendWrite` helper in `src/lib/genlayer.ts`:
 
-1. Encode GenVM calldata via `abi.calldata.encode`
-2. Serialize the transaction payload via `abi.transactions.serialize`
+1. Encode GenVM calldata via an inline binary encoder (`_glEncode` in `src/lib/genlayer.ts`) — this bypasses the genlayer-js vendor chunk, which can be stale in Vercel's Next.js cache and produce incorrect calldata for write calls with named arguments
+2. RLP-serialize the transaction payload as `[encoded_bytes, false]`
 3. Encode the EVM `addTransaction` call targeting the consensus contract
 4. Estimate gas (5s timeout, 200k fallback)
 5. Submit via `eth_sendTransaction` through the injected wallet — returns the tx hash immediately
 6. The UI polls for committee status changes (8s intervals)
+
+All read calls use a matching inline decoder (`_glDecode`) and go direct HTTP via `gen_call` RPC — bypassing genlayer-js `readContract` entirely to avoid the same caching issue.
 
 LLM consensus actions poll for up to **10 minutes** (75 × 8s) because validator evaluation typically takes 4–8 minutes on StudioNet.
 

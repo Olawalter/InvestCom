@@ -1,24 +1,135 @@
-﻿import { createClient, abi } from "genlayer-js";
+﻿import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
-import { encodeFunctionData, fromHex, type Address, type Hex } from "viem";
+import { encodeFunctionData, toHex, toRlp, fromHex, type Address, type Hex } from "viem";
 
 const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS ?? "") as Address;
 const EXPLORER_URL = process.env.NEXT_PUBLIC_GENLAYER_EXPLORER_URL ?? "https://explorer-studio.genlayer.com";
 const GL_RPC = "https://studio.genlayer.com/api";
 
-// Direct read: bypasses genlayer-js readContract (which may use a stale cached
-// calldata encoder in the Vercel bundle) and makes a raw fetch to the GenLayer RPC.
-// Uses genlayer-js abi functions directly so the encoder is bundled fresh.
-async function directRead(functionName: string, args: unknown[] = []): Promise<unknown> {
-  const { encode, makeCalldataObject } = abi.calldata;
-  const { serialize } = abi.transactions;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const calldataObj = (makeCalldataObject as any)(functionName, args, undefined);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const encoded = (encode as any)(calldataObj);
-  const data = (serialize as any)([encoded, false]);
+// ── GenLayer calldata encoder (inline, no genlayer-js import) ─────────────────
+// Replicates genlayer-js abi.calldata.encode + abi.transactions.serialize using
+// the same type constants so the encoder lives in application code (not the
+// vendor chunk) and is always rebuilt fresh by Next.js.
+const _T = { SPECIAL: 0, PINT: 1, NINT: 2, BYTES: 3, STR: 4, ARR: 5, MAP: 6 };
+const _BITS = 3;
 
+function _writeVarInt(out: number[], n: bigint) {
+  if (n === BigInt(0)) { out.push(0); return; }
+  while (n > BigInt(0)) {
+    let b = Number(n & BigInt(0x7f));
+    n >>= BigInt(7);
+    if (n > BigInt(0)) b |= 128;
+    out.push(b);
+  }
+}
+function _encodeVal(out: number[], v: unknown) {
+  if (v === null || v === undefined) { out.push(0); return; }
+  if (typeof v === "boolean") {
+    out.push(v ? (2 << _BITS) | _T.SPECIAL : (1 << _BITS) | _T.SPECIAL);
+    return;
+  }
+  if (typeof v === "number") {
+    const n = BigInt(Math.trunc(v));
+    n >= BigInt(0) ? _writeVarInt(out, (n << BigInt(_BITS)) | BigInt(_T.PINT))
+                   : _writeVarInt(out, ((-n - BigInt(1)) << BigInt(_BITS)) | BigInt(_T.NINT));
+    return;
+  }
+  if (typeof v === "string") {
+    const bytes = new TextEncoder().encode(v);
+    _writeVarInt(out, (BigInt(bytes.length) << BigInt(_BITS)) | BigInt(_T.STR));
+    for (const b of bytes) out.push(b);
+    return;
+  }
+  if (Array.isArray(v)) {
+    _writeVarInt(out, (BigInt(v.length) << BigInt(_BITS)) | BigInt(_T.ARR));
+    for (const item of v) _encodeVal(out, item);
+    return;
+  }
+  if (typeof v === "object") {
+    const entries = Object.entries(v as Record<string, unknown>)
+      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+    _writeVarInt(out, (BigInt(entries.length) << BigInt(_BITS)) | BigInt(_T.MAP));
+    for (const [k, val] of entries) {
+      _encodeVal(out, k);
+      _encodeVal(out, val);
+    }
+    return;
+  }
+}
+
+function _glEncode(method: string, args: unknown[]): string {
+  const obj: Record<string, unknown> = { method };
+  if (args.length > 0) obj.args = args;
+  const out: number[] = [];
+  _encodeVal(out, obj);
+  // serialize([encoded_bytes, false]) = toRlp([toHex(bytes), toHex(false)])
+  return toRlp([toHex(new Uint8Array(out)), toHex(false)]);
+}
+
+// ── GenLayer result decoder (inline) ─────────────────────────────────────────
+// Mirrors genlayer-js abi.calldata.decode so the decoder is also fresh-bundled.
+function _readVarInt(buf: Uint8Array, pos: number): [bigint, number] {
+  let result = BigInt(0), shift = BigInt(0);
+  while (pos < buf.length) {
+    const b = buf[pos++];
+    result |= BigInt(b & 0x7f) << shift;
+    shift += BigInt(7);
+    if ((b & 0x80) === 0) break;
+  }
+  return [result, pos];
+}
+function _decodeVal(buf: Uint8Array, pos: number): [unknown, number] {
+  let tag: bigint;
+  [tag, pos] = _readVarInt(buf, pos);
+  const type = Number(tag & BigInt(7));
+  const payload = tag >> BigInt(_BITS);
+  switch (type) {
+    case _T.SPECIAL: {
+      const v = Number(payload);
+      return [v === 0 ? null : v === 1 ? false : v === 2 ? true : null, pos];
+    }
+    case _T.PINT:  return [Number(payload), pos];
+    case _T.NINT:  return [-Number(payload) - 1, pos];
+    case _T.BYTES: {
+      const len = Number(payload);
+      return [buf.slice(pos, pos + len), pos + len];
+    }
+    case _T.STR: {
+      const len = Number(payload);
+      return [new TextDecoder().decode(buf.slice(pos, pos + len)), pos + len];
+    }
+    case _T.ARR: {
+      const len = Number(payload);
+      const arr: unknown[] = [];
+      for (let i = 0; i < len; i++) {
+        let v: unknown; [v, pos] = _decodeVal(buf, pos); arr.push(v);
+      }
+      return [arr, pos];
+    }
+    case _T.MAP: {
+      const len = Number(payload);
+      const obj: Record<string, unknown> = {};
+      for (let i = 0; i < len; i++) {
+        let k: unknown, v: unknown;
+        [k, pos] = _decodeVal(buf, pos);
+        [v, pos] = _decodeVal(buf, pos);
+        obj[String(k)] = v;
+      }
+      return [obj, pos];
+    }
+    default: return [null, pos];
+  }
+}
+function _glDecode(hex: string): unknown {
+  const bytes = fromHex(hex as Hex, "bytes");
+  const [val] = _decodeVal(bytes, 0);
+  return val;
+}
+
+// ── Direct read ───────────────────────────────────────────────────────────────
+async function directRead(functionName: string, args: unknown[] = []): Promise<unknown> {
+  const data = _glEncode(functionName, args);
   const res = await fetch(GL_RPC, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -37,13 +148,7 @@ async function directRead(functionName: string, args: unknown[] = []): Promise<u
   });
   const json = await res.json() as { result?: string; error?: { code: number; message: string } };
   if (json.error) throw new Error(json.error.message);
-
-  // Decode the hex result using genlayer-js abi decoder
-  const { decode } = abi.calldata;
-  const bytes = fromHex(json.result as Hex, "bytes");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const decoded = (decode as any)(bytes);
-  return decoded;
+  return _glDecode(json.result as string);
 }
 
 // â”€â”€â”€ Client factory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -108,12 +213,8 @@ async function sendWrite(
   const consensus = (chain as any).consensusMainContract as { address: string; abi: unknown[] };
   const consensusAddr = consensus.address as Address;
 
-  // 1. Encode GenVM calldata â†’ txData bytes
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const calldataObj = (abi.calldata.makeCalldataObject as any)(functionName, callArgs, undefined);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const encoded = (abi.calldata.encode as any)(calldataObj);
-  const txData = abi.transactions.serialize([encoded, false]);
+  // 1. Encode GenVM calldata â†’ txData bytes (inline encoder, bypasses stale vendor chunk)
+  const txData = _glEncode(functionName, callArgs);
 
   // 2. Encode EVM addTransaction call
   const evmData = encodeFunctionData({

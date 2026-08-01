@@ -1,12 +1,16 @@
-import { createClient, abi } from "genlayer-js";
+﻿import { createClient, abi } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
 import { encodeFunctionData, type Address, type Hex } from "viem";
 
+// GenLayer's gen_call RPC requires lowercase hex addresses; EIP-55 checksummed
+// addresses are rejected. Keep a separate lowercase alias for all readContract
+// calls while the checksummed form is used for viem's encodeFunctionData.
 const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS ?? "") as Address;
+const CONTRACT_ADDRESS_LC = CONTRACT_ADDRESS.toLowerCase() as Address;
 const EXPLORER_URL = process.env.NEXT_PUBLIC_GENLAYER_EXPLORER_URL ?? "https://explorer-studio.genlayer.com";
 
-// ─── Client factory ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Client factory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Creates a genlayer client backed by an injected EVM wallet.
@@ -29,7 +33,7 @@ export function explorerContractUrl() {
   return `${EXPLORER_URL}/address/${CONTRACT_ADDRESS}`;
 }
 
-// ─── Helper: wait for FINALIZED ──────────────────────────────────────────────
+// â”€â”€â”€ Helper: wait for FINALIZED â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function waitForFinalized(client: ReturnType<typeof createClient>, hash: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,7 +45,7 @@ export async function waitForFinalized(client: ReturnType<typeof createClient>, 
   });
 }
 
-// ─── Non-blocking write helper ────────────────────────────────────────────────
+// â”€â”€â”€ Non-blocking write helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // StudioNet returns {"jsonrpc":"2.0","id":1} (no result, no error) for
 // eth_getTransactionReceipt, so genlayer-js's _sendConsensusCall hangs forever
@@ -49,8 +53,8 @@ export async function waitForFinalized(client: ReturnType<typeof createClient>, 
 // waiting by returning the EVM tx hash immediately.
 //
 // Two signing paths:
-//   json-rpc account (injected wallet) → eth_sendTransaction via provider
-//   local account                       → signTransaction + sendRawTransaction
+//   json-rpc account (injected wallet) â†’ eth_sendTransaction via provider
+//   local account                       â†’ signTransaction + sendRawTransaction
 
 async function sendWrite(
   client: ReturnType<typeof createClient>,
@@ -68,7 +72,7 @@ async function sendWrite(
   const consensus = (chain as any).consensusMainContract as { address: string; abi: unknown[] };
   const consensusAddr = consensus.address as Address;
 
-  // 1. Encode GenVM calldata → txData bytes
+  // 1. Encode GenVM calldata â†’ txData bytes
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const calldataObj = (abi.calldata.makeCalldataObject as any)(functionName, callArgs, undefined);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -124,11 +128,11 @@ async function sendWrite(
   return txHash as string;
 }
 
-// ─── Read calls ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ Read calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function getAllCommittees(client: ReturnType<typeof createClient>) {
   return client.readContract({
-    address: CONTRACT_ADDRESS,
+    address: CONTRACT_ADDRESS_LC,
     functionName: "get_all_committees",
     args: [],
   });
@@ -136,7 +140,7 @@ export async function getAllCommittees(client: ReturnType<typeof createClient>) 
 
 export async function getCommittee(client: ReturnType<typeof createClient>, committeeId: number) {
   return client.readContract({
-    address: CONTRACT_ADDRESS,
+    address: CONTRACT_ADDRESS_LC,
     functionName: "get_committee",
     args: [committeeId],
   });
@@ -144,7 +148,7 @@ export async function getCommittee(client: ReturnType<typeof createClient>, comm
 
 export async function getCommitteeProposals(client: ReturnType<typeof createClient>, committeeId: number) {
   return client.readContract({
-    address: CONTRACT_ADDRESS,
+    address: CONTRACT_ADDRESS_LC,
     functionName: "get_committee_proposals",
     args: [committeeId],
   });
@@ -152,7 +156,7 @@ export async function getCommitteeProposals(client: ReturnType<typeof createClie
 
 export async function getProposal(client: ReturnType<typeof createClient>, proposalId: number) {
   return client.readContract({
-    address: CONTRACT_ADDRESS,
+    address: CONTRACT_ADDRESS_LC,
     functionName: "get_proposal",
     args: [proposalId],
   });
@@ -160,7 +164,7 @@ export async function getProposal(client: ReturnType<typeof createClient>, propo
 
 export async function getRecommendationResult(client: ReturnType<typeof createClient>, committeeId: number) {
   return client.readContract({
-    address: CONTRACT_ADDRESS,
+    address: CONTRACT_ADDRESS_LC,
     functionName: "get_recommendation_result",
     args: [committeeId],
   });
@@ -168,7 +172,7 @@ export async function getRecommendationResult(client: ReturnType<typeof createCl
 
 export async function getAppeal(client: ReturnType<typeof createClient>, committeeId: number) {
   return client.readContract({
-    address: CONTRACT_ADDRESS,
+    address: CONTRACT_ADDRESS_LC,
     functionName: "get_appeal",
     args: [committeeId],
   });
@@ -176,7 +180,7 @@ export async function getAppeal(client: ReturnType<typeof createClient>, committ
 
 export async function getCommitteesByDao(client: ReturnType<typeof createClient>, address: string) {
   return client.readContract({
-    address: CONTRACT_ADDRESS,
+    address: CONTRACT_ADDRESS_LC,
     functionName: "get_committees_by_dao",
     args: [address],
   });
@@ -184,13 +188,13 @@ export async function getCommitteesByDao(client: ReturnType<typeof createClient>
 
 export async function getProposalsByProposer(client: ReturnType<typeof createClient>, address: string) {
   return client.readContract({
-    address: CONTRACT_ADDRESS,
+    address: CONTRACT_ADDRESS_LC,
     functionName: "get_proposals_by_proposer",
     args: [address],
   });
 }
 
-// ─── Write calls ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Write calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function createCommittee(
   client: ReturnType<typeof createClient>,
@@ -320,4 +324,5 @@ export async function requestAppealReview(client: ReturnType<typeof createClient
 export async function finalizeRecommendation(client: ReturnType<typeof createClient>, committeeId: number) {
   return sendWrite(client, "finalize_recommendation", [committeeId]);
 }
+
 

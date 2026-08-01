@@ -24,6 +24,11 @@ next-env.d.ts
 *.sln
 *.sw?
 
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
 # Claude Code session data
 .claude/
 

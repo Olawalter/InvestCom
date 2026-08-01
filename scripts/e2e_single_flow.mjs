@@ -259,8 +259,11 @@ async function main() {
 
   // ── Step 6: Wait for appeal window, then finalize ────────────────────────
   log("STEP 6 — Wait for appeal window to expire, then finalize");
-  const appealExpiry = (committee.appeal_deadline ?? (now() + appealWindow)) * 1000;
-  const waitAppeal   = appealExpiry - Date.now() + 5000;
+  // appeal_deadline can be 0 (falsy) in the object even when set — use > 0
+  const appealDeadlineSec = committee.appeal_deadline > 0
+    ? committee.appeal_deadline
+    : now() + appealWindow;
+  const waitAppeal = appealDeadlineSec * 1000 - Date.now() + 5000;
   if (waitAppeal > 0) {
     log(`  ⏳ Waiting ${Math.ceil(waitAppeal / 1000)}s for appeal window (${appealWindow}s)…`);
     await sleep(waitAppeal);
@@ -268,8 +271,9 @@ async function main() {
 
   await tx("finalize_recommendation", [cid], "finalize_recommendation");
 
-  // ── Final read ────────────────────────────────────────────────────────────
-  const final = await read("get_committee", [cid]);
+  // Poll for finalized — state propagation takes a few seconds after tx lands
+  log("  Polling for finalized status…");
+  const final = await pollStatus(cid, "finalized", 120_000);
   const finalProposals = await read("get_committee_proposals", [cid]);
 
   console.log("\n╔══════════════════════════════════════════════════════════════╗");

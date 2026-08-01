@@ -6,6 +6,9 @@ Investment Committee is an on-chain protocol that lets a DAO define its investme
 
 It is not a price oracle. It is not financial advice. It is a **policy evaluation engine** that runs on GenLayer's Intelligent Contract runtime.
 
+**Live contract:** `0x848ceD2E9e07d69DA133cd425c643B41E43fBf18` on GenLayer StudioNet  
+**Explorer:** https://explorer-studio.genlayer.com/address/0x848ceD2E9e07d69DA133cd425c643B41E43fBf18
+
 ---
 
 ## What it solves
@@ -49,7 +52,7 @@ CANONICAL_FIELDS = [
 
 **Design rationale:** Independent validators calling the same LLM prompt with live web data will produce slightly different phrasing and scoring for subjective fields like `policy_fit_band` or `risk_band` — the same way two human analysts might say "strong fit" vs "excellent fit" for the same proposal. Requiring exact agreement on these subjective ratings causes systematic `Undetermined` consensus outcomes. The fields the DAO *acts on* are the binary outcome (`verdict`) and which specific proposal won (`recommended_proposal_id`). Validators reliably agree on these when the prompt uses structured decision rules (STEP 1–3 in the contract prompt). All other fields — bands, confidence, short_reason — are stored from the leader's result and surfaced to the DAO as explanatory metadata, not as consensus-enforced values.
 
-For appeal review, the canonical field is `final_recommendation_changed` (boolean) + `new_recommended_proposal_id` if true. The `appeal_verdict` label is stored but not enforced by consensus — what the DAO cares about is whether the outcome changes, not how the label is worded.
+For appeal review, the canonical fields are `final_recommendation_changed` (boolean) + `new_recommended_proposal_id` if true. The `appeal_verdict` label is stored but not enforced by consensus — what the DAO cares about is whether the outcome changes, not how the label is worded.
 
 ### Verdict types
 
@@ -83,21 +86,28 @@ For appeal review, the canonical field is `final_recommendation_changed` (boolea
 ```
 .
 ├── contract/
-│   └── investment_committee.py    # GenLayer IntelliContract (Python)
+│   └── investment_committee.py      # GenLayer IntelliContract (Python)
 ├── scripts/
-│   └── deploy.mjs                 # Deployment script
+│   ├── deploy.mjs                   # Deployment script
+│   ├── e2e_single_flow.mjs          # Single full-lifecycle E2E (recommended)
+│   └── e2e_test.mjs                 # 3-flow parallel E2E suite
+├── tests/
+│   ├── direct/                      # In-memory unit tests (no network)
+│   │   └── test_committee.py
+│   └── integration/                 # Full consensus integration tests
+│       └── test_committee_integration.py
 ├── src/
-│   ├── app/                       # Next.js App Router pages
-│   │   ├── page.tsx               # Landing page
+│   ├── app/                         # Next.js App Router pages
+│   │   ├── page.tsx                 # Landing page
 │   │   ├── committees/
-│   │   │   ├── page.tsx           # Committee list
+│   │   │   ├── page.tsx             # Committee list (loads without wallet)
 │   │   │   └── [committeeId]/
-│   │   │       ├── page.tsx       # Detail + DAO actions
+│   │   │       ├── page.tsx         # Detail + DAO actions
 │   │   │       ├── submit-proposal/
 │   │   │       ├── appeal/
 │   │   │       └── recommendation/
-│   │   └── profile/               # Connected wallet activity
-│   ├── components/                # UI components
+│   │   └── profile/                 # Wallet dashboard + protocol activity
+│   ├── components/                  # UI components
 │   │   ├── CommitteeRecommendationSeal.tsx
 │   │   ├── InvestmentProposalCard.tsx
 │   │   ├── PolicyPacketPanel.tsx
@@ -105,12 +115,12 @@ For appeal review, the canonical field is `final_recommendation_changed` (boolea
 │   │   ├── RecommendationTimeline.tsx
 │   │   └── ...
 │   ├── context/
-│   │   └── WalletContext.tsx      # Wallet state + modal UI
+│   │   └── WalletContext.tsx        # Wallet state + modal UI
 │   └── lib/
-│       ├── genlayer.ts            # Client factory + all contract calls
-│       ├── types.ts               # TypeScript types for all entities
-│       ├── utils.ts               # formatAddress, cn, etc.
-│       └── wallet.ts              # Pure EIP-6963 detection + chain switching
+│       ├── genlayer.ts              # Inline calldata encoder/decoder + all contract calls
+│       ├── types.ts                 # TypeScript types for all entities
+│       ├── utils.ts                 # formatAddress, cn, etc.
+│       └── wallet.ts               # Pure EIP-6963 detection + chain switching
 └── tailwind.config.ts
 ```
 
@@ -121,8 +131,9 @@ For appeal review, the canonical field is `final_recommendation_changed` (boolea
 ### Prerequisites
 
 - Node.js 18+
-- A deployed Investment Committee contract on GenLayer StudioNet
 - MetaMask, Rabby, or any EIP-6963-compatible injected wallet
+
+The contract is already deployed on GenLayer StudioNet — no deployment needed to run the app.
 
 ### Install
 
@@ -154,9 +165,11 @@ npm run dev
 ### Run direct tests (no network needed)
 
 ```bash
-pip install genlayer-test
+pip install gltest
 pytest tests/direct/ -v
 ```
+
+Direct tests run entirely in-memory using gltest's `VMContext`. LLM and web calls are mocked so they complete in milliseconds.
 
 ### Run integration tests (requires GenLayer node)
 
@@ -172,17 +185,27 @@ gltest tests/integration/ -v -s
 
 Integration tests exercise real LLM consensus, live web fetching, and the full validator agreement process. Each `request_recommendation` call triggers a consensus round (~4–8 min on StudioNet).
 
-### Run live E2E tests on StudioNet
+### Run a full lifecycle E2E on StudioNet
 
 ```bash
-node scripts/e2e_test.mjs
+E2E_KEY_DAO=0x<private-key> node scripts/e2e_single_flow.mjs
 ```
 
-Runs all 3 flows against the deployed contract using real wallets. Consensus requests are staggered 90s apart to avoid StudioNet execution slot contention. Total runtime ~20–25 min.
+Creates a committee, submits a proposal, triggers LLM consensus, waits for the appeal window, and finalizes — all in one run against the live contract. Total runtime ~5–10 min depending on StudioNet validator load.
+
+To run all 3 demonstration flows (single proposal, appeal path, competing proposals):
+
+```bash
+E2E_KEY_DAO=0x<private-key> node scripts/e2e_test.mjs
+```
+
+Consensus requests are staggered 90s apart to avoid StudioNet execution slot contention. Total runtime ~20–25 min.
 
 ---
 
 ## Deploying the contract
+
+The contract is already live at `0x848ceD2E9e07d69DA133cd425c643B41E43fBf18`. Only redeploy if you change the contract source.
 
 The deployment script manually encodes an `addTransaction` call with a zero-address destination (GenLayer's deploy convention), since genlayer-js does not expose `deployContract` in its public API.
 
@@ -190,9 +213,9 @@ The deployment script manually encodes an `addTransaction` call with a zero-addr
 DEPLOY_PRIVATE_KEY=0xYourPrivateKey node scripts/deploy.mjs
 ```
 
-Copy the output contract address into `NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS`.
+After deploying, copy the printed address into `.env.local` as `NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS` and redeploy the frontend.
 
-> Any change to `CANONICAL_FIELDS`, storage layout, or method signatures in `investment_committee.py` requires a redeployment and address update.
+> Any change to `CANONICAL_FIELDS`, storage layout, or method signatures in `investment_committee.py` requires a redeployment.
 
 ---
 
@@ -220,6 +243,7 @@ All methods live on `InvestmentCommitteeProtocol(gl.Contract)`.
 | Method | Returns |
 |---|---|
 | `get_all_committees()` | All committees |
+| `get_committee_count()` | Total number of committees |
 | `get_committee(id)` | Single committee |
 | `get_committee_proposals(id)` | All proposals for a committee |
 | `get_proposal(id)` | Single proposal |
@@ -237,7 +261,7 @@ All methods live on `InvestmentCommitteeProtocol(gl.Contract)`.
 | `risk_thesis` | 50–3,000 characters |
 | `fundamental_thesis` | 50–3,000 characters |
 | `governance_risks` | 30–2,000 characters |
-| `allocation_bps` | ≤ `max_single_asset_exposure_bps` set by DAO |
+| `allocation_bps` | ≤ `max_single_asset_exposure_bps` and ≤ `max_protocol_exposure_bps` set by DAO |
 | `evidence_urls` | 1–8 valid HTTPS URLs |
 
 ---
@@ -265,14 +289,14 @@ Wallet support is pure EIP-6963 — no hardcoded wallet SDK.
 
 GenLayer StudioNet returns empty on `eth_getTransactionReceipt`, so genlayer-js's default write path hangs indefinitely. All write calls go through a custom `sendWrite` helper in `src/lib/genlayer.ts`:
 
-1. Encode GenVM calldata via an inline binary encoder (`_glEncode` in `src/lib/genlayer.ts`) — this bypasses the genlayer-js vendor chunk, which can be stale in Vercel's Next.js cache and produce incorrect calldata for write calls with named arguments
+1. Encode GenVM calldata via an inline binary encoder (`_glEncode`) — this deliberately bypasses the genlayer-js vendor chunk, which can be stale in Vercel's Next.js cache and produce incorrect calldata
 2. RLP-serialize the transaction payload as `[encoded_bytes, false]`
 3. Encode the EVM `addTransaction` call targeting the consensus contract
 4. Estimate gas (5s timeout, 200k fallback)
 5. Submit via `eth_sendTransaction` through the injected wallet — returns the tx hash immediately
 6. The UI polls for committee status changes (8s intervals)
 
-All read calls use a matching inline decoder (`_glDecode`) and go direct HTTP via `gen_call` RPC — bypassing genlayer-js `readContract` entirely to avoid the same caching issue.
+All read calls use a matching inline decoder (`_glDecode`) and go direct HTTP via `gen_call` RPC — bypassing genlayer-js `readContract` entirely for the same reason.
 
 LLM consensus actions poll for up to **10 minutes** (75 × 8s) because validator evaluation typically takes 4–8 minutes on StudioNet.
 

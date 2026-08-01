@@ -1,16 +1,50 @@
 ﻿import { createClient, abi } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
-import { encodeFunctionData, type Address, type Hex } from "viem";
+import { encodeFunctionData, fromHex, type Address, type Hex } from "viem";
 
 const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS ?? "") as Address;
 const EXPLORER_URL = process.env.NEXT_PUBLIC_GENLAYER_EXPLORER_URL ?? "https://explorer-studio.genlayer.com";
+const GL_RPC = "https://studio.genlayer.com/api";
 
-// Read-only client with no wallet provider — routes directly to the GenLayer
-// HTTP transport. When a wallet provider is attached, genlayer-js routes reads
-// through the injected wallet (MetaMask/Rabby) which rejects gen_call requests.
-// All readContract calls must use this client; only writes use the wallet client.
-const READ_CLIENT = createClient({ chain: studionet } as Parameters<typeof createClient>[0]);
+// Direct read: bypasses genlayer-js readContract (which may use a stale cached
+// calldata encoder in the Vercel bundle) and makes a raw fetch to the GenLayer RPC.
+// Uses genlayer-js abi functions directly so the encoder is bundled fresh.
+async function directRead(functionName: string, args: unknown[] = []): Promise<unknown> {
+  const { encode, makeCalldataObject } = abi.calldata;
+  const { serialize } = abi.transactions;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const calldataObj = (makeCalldataObject as any)(functionName, args, undefined);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const encoded = (encode as any)(calldataObj);
+  const data = (serialize as any)([encoded, false]);
+
+  const res = await fetch(GL_RPC, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: Date.now(),
+      method: "gen_call",
+      params: [{
+        type: "read",
+        to: CONTRACT_ADDRESS,
+        from: "0x0000000000000000000000000000000000000000",
+        data,
+        transaction_hash_variant: "latest-nonfinal",
+      }],
+    }),
+  });
+  const json = await res.json() as { result?: string; error?: { code: number; message: string } };
+  if (json.error) throw new Error(json.error.message);
+
+  // Decode the hex result using genlayer-js abi decoder
+  const { decode } = abi.calldata;
+  const bytes = fromHex(json.result as Hex, "bytes");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const decoded = (decode as any)(bytes);
+  return decoded;
+}
 
 // â”€â”€â”€ Client factory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -132,68 +166,36 @@ async function sendWrite(
 
 // â”€â”€â”€ Read calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-export async function getAllCommittees(client: ReturnType<typeof createClient>) {
-  return READ_CLIENT.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: "get_all_committees",
-    args: [],
-  });
+export async function getAllCommittees(_client: ReturnType<typeof createClient>) {
+  return directRead("get_all_committees");
 }
 
-export async function getCommittee(client: ReturnType<typeof createClient>, committeeId: number) {
-  return READ_CLIENT.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: "get_committee",
-    args: [committeeId],
-  });
+export async function getCommittee(_client: ReturnType<typeof createClient>, committeeId: number) {
+  return directRead("get_committee", [committeeId]);
 }
 
-export async function getCommitteeProposals(client: ReturnType<typeof createClient>, committeeId: number) {
-  return READ_CLIENT.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: "get_committee_proposals",
-    args: [committeeId],
-  });
+export async function getCommitteeProposals(_client: ReturnType<typeof createClient>, committeeId: number) {
+  return directRead("get_committee_proposals", [committeeId]);
 }
 
-export async function getProposal(client: ReturnType<typeof createClient>, proposalId: number) {
-  return READ_CLIENT.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: "get_proposal",
-    args: [proposalId],
-  });
+export async function getProposal(_client: ReturnType<typeof createClient>, proposalId: number) {
+  return directRead("get_proposal", [proposalId]);
 }
 
-export async function getRecommendationResult(client: ReturnType<typeof createClient>, committeeId: number) {
-  return READ_CLIENT.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: "get_recommendation_result",
-    args: [committeeId],
-  });
+export async function getRecommendationResult(_client: ReturnType<typeof createClient>, committeeId: number) {
+  return directRead("get_recommendation_result", [committeeId]);
 }
 
-export async function getAppeal(client: ReturnType<typeof createClient>, committeeId: number) {
-  return READ_CLIENT.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: "get_appeal",
-    args: [committeeId],
-  });
+export async function getAppeal(_client: ReturnType<typeof createClient>, committeeId: number) {
+  return directRead("get_appeal", [committeeId]);
 }
 
-export async function getCommitteesByDao(client: ReturnType<typeof createClient>, address: string) {
-  return READ_CLIENT.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: "get_committees_by_dao",
-    args: [address],
-  });
+export async function getCommitteesByDao(_client: ReturnType<typeof createClient>, address: string) {
+  return directRead("get_committees_by_dao", [address]);
 }
 
-export async function getProposalsByProposer(client: ReturnType<typeof createClient>, address: string) {
-  return READ_CLIENT.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: "get_proposals_by_proposer",
-    args: [address],
-  });
+export async function getProposalsByProposer(_client: ReturnType<typeof createClient>, address: string) {
+  return directRead("get_proposals_by_proposer", [address]);
 }
 
 // â”€â”€â”€ Write calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

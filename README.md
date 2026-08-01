@@ -38,7 +38,7 @@ Each status transition is a separate on-chain transaction. The non-deterministic
 
 ### Canonical consensus fields
 
-Only these fields must agree between validators. Free-form text fields (`short_reason`, `reason_code`) are deliberately excluded — independent LLM calls will phrase things differently but agree on the structured outcome.
+Only these two fields must agree between validators:
 
 ```python
 CANONICAL_FIELDS = [
@@ -46,6 +46,10 @@ CANONICAL_FIELDS = [
     "recommended_proposal_id",
 ]
 ```
+
+**Design rationale:** Independent validators calling the same LLM prompt with live web data will produce slightly different phrasing and scoring for subjective fields like `policy_fit_band` or `risk_band` — the same way two human analysts might say "strong fit" vs "excellent fit" for the same proposal. Requiring exact agreement on these subjective ratings causes systematic `Undetermined` consensus outcomes. The fields the DAO *acts on* are the binary outcome (`verdict`) and which specific proposal won (`recommended_proposal_id`). Validators reliably agree on these when the prompt uses structured decision rules (STEP 1–3 in the contract prompt). All other fields — bands, confidence, short_reason — are stored from the leader's result and surfaced to the DAO as explanatory metadata, not as consensus-enforced values.
+
+For appeal review, the canonical field is `final_recommendation_changed` (boolean) + `new_recommended_proposal_id` if true. The `appeal_verdict` label is stored but not enforced by consensus — what the DAO cares about is whether the outcome changes, not how the label is worded.
 
 ### Verdict types
 
@@ -137,7 +141,7 @@ NEXT_PUBLIC_CHAIN_NAME=GenLayer StudioNet
 NEXT_PUBLIC_CHAIN_ID=61999
 NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
 NEXT_PUBLIC_GENLAYER_EXPLORER_URL=https://explorer-studio.genlayer.com
-NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=0x3d69DD001d0E8cffBDb9268Fdd7c86C30E1b7b79
+NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=0x7808f162dDC659da3587283d283C5eBA443b2130
 ```
 
 ### Run the dev server
@@ -146,6 +150,35 @@ NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=0x3d69DD001d0E8cffBDb9268Fdd7c86C30E1b7b79
 npm run dev
 # → http://localhost:3000
 ```
+
+### Run direct tests (no network needed)
+
+```bash
+pip install genlayer-test
+pytest tests/direct/ -v
+```
+
+### Run integration tests (requires GenLayer node)
+
+```bash
+# Target StudioNet
+genlayer network set studio
+gltest tests/integration/ -v -s
+
+# Or target a local simulator
+genlayer network set sim
+gltest tests/integration/ -v -s
+```
+
+Integration tests exercise real LLM consensus, live web fetching, and the full validator agreement process. Each `request_recommendation` call triggers a consensus round (~4–8 min on StudioNet).
+
+### Run live E2E tests on StudioNet
+
+```bash
+node scripts/e2e_test.mjs
+```
+
+Runs all 3 flows against the deployed contract using real wallets. Consensus requests are staggered 90s apart to avoid StudioNet execution slot contention. Total runtime ~20–25 min.
 
 ---
 

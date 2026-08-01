@@ -390,40 +390,58 @@ class InvestmentCommitteeProtocol(gl.Contract):
 
             prompt = (
                 "You are evaluating investment proposals for a DAO treasury committee.\n"
-                "This is a POLICY EVALUATION -- not a price forecast or trading signal.\n"
-                "Identify which proposal best satisfies the DAO's stated investment policy.\n\n"
+                "This is a POLICY EVALUATION -- not a price forecast or trading signal.\n\n"
                 f"DAO Policy:\n{json.dumps(policy_packet, indent=2)}\n\n"
                 f"Evaluation weights (sum to 100):\n{json.dumps(evaluation_weights, indent=2)}\n\n"
-                "Proposals with live evidence fetched from each proposal's evidence_urls:\n"
+                "Proposals (with live evidence fetched from each proposal's evidence_urls):\n"
                 f"{json.dumps(enriched, indent=2)}\n\n"
-                "Evaluate each proposal against:\n"
-                "1. Treasury objective fit\n"
-                "2. Risk appetite compliance (compare risk_appetite and limits)\n"
-                "3. Liquidity requirement compliance\n"
-                "4. Fundamental quality -- use live_evidence to verify claims\n"
-                "5. Governance risk\n"
-                "6. Allocation limit compliance (allocation_bps vs max_single_asset_exposure_bps)\n"
-                "7. Disallowed asset compliance\n"
-                "8. Evidence credibility (FETCH_UNAVAILABLE reduces confidence)\n"
-                "9. Is any proposal suitable? Or do all violate policy?\n"
-                "10. Are the top proposals too close to rank? (tie)\n\n"
-                "Apply evaluation_weights across criteria.\n"
-                "When live_evidence content is available, use it to verify or challenge "
-                "claims made in the proposal text.\n\n"
-                "Return a JSON object (no markdown, no extra text):\n"
-                '{"verdict":"proposal_recommended|no_suitable_proposal|tie_detected|'
-                'insufficient_evidence|policy_violation_detected|manual_review_required",'
+                "Follow these steps EXACTLY IN ORDER:\n\n"
+                "STEP 1 — Hard disqualification (check each proposal):\n"
+                "  - If a proposal lists an asset present in disallowed_assets: DISQUALIFY it.\n"
+                "  - If a proposal's allocation_bps > max_single_asset_exposure_bps: DISQUALIFY it.\n"
+                "  - If a proposal's asset_or_strategy mentions any disallowed asset type: DISQUALIFY it.\n\n"
+                "STEP 2 — Score each remaining (non-disqualified) proposal 0-100:\n"
+                "  Use the evaluation_weights to weight these five dimensions:\n"
+                "  - risk (default 30): Does risk_thesis match the stated risk_appetite? "
+                "Are risks mitigated?\n"
+                "  - liquidity (default 25): Does liquidity_profile guarantee the stated "
+                "liquidity_requirement? Count only verified withdrawal mechanisms.\n"
+                "  - fundamentals (default 20): Quality of fundamental_thesis, "
+                "cross-checked against live_evidence. FETCH_UNAVAILABLE reduces this score.\n"
+                "  - governance (default 15): Is the team identified and KYC-verified? "
+                "Are audits present and recent?\n"
+                "  - treasury_objective_fit (default 10): How directly does this strategy "
+                "serve the treasury_objective?\n"
+                "  Compute each dimension as a 0-100 score, then: "
+                "total = sum(score_i * weight_i / 100).\n\n"
+                "STEP 3 — Select verdict using these rules (apply in order, stop at first match):\n"
+                "  a. If ALL proposals were DISQUALIFIED in Step 1: "
+                'verdict="policy_violation_detected", recommended_proposal_id=0\n'
+                "  b. If no proposal scores >= 35 after weighting: "
+                'verdict="no_suitable_proposal", recommended_proposal_id=0\n'
+                "  c. If there are >= 2 proposals and the top-2 weighted scores differ "
+                "by <= 5 points (both >= 35): "
+                'verdict="tie_detected", recommended_proposal_id=0\n'
+                "  d. If ONE proposal has the highest weighted score (>= 35) and leads "
+                "the next by > 5 points: "
+                'verdict="proposal_recommended", recommended_proposal_id=<that proposal\'s proposal_id>\n'
+                "  e. If evidence is entirely FETCH_UNAVAILABLE for all proposals: "
+                'verdict="insufficient_evidence", recommended_proposal_id=0\n'
+                "  f. If none of the above apply: "
+                'verdict="manual_review_required", recommended_proposal_id=0\n\n'
+                "Return ONLY a JSON object (no markdown, no extra text):\n"
+                '{"verdict":"<from step 3>",'
                 '"recommended_proposal_id":<int, 0 if none>,'
-                '"recommended_proposer":"<address or empty string>",'
-                '"confidence":<int 0-100>,'
+                '"recommended_proposer":"<proposer address of winning proposal, or empty>",'
+                '"confidence":<int 0-100, your certainty in this verdict>,'
                 '"policy_fit_band":"poor|weak|acceptable|strong|excellent",'
                 '"risk_band":"excessive|high|moderate|low|minimal",'
                 '"liquidity_band":"illiquid|weak|acceptable|strong|excellent",'
                 '"fundamentals_band":"weak|questionable|acceptable|strong|excellent",'
                 '"governance_band":"dangerous|weak|acceptable|strong|excellent",'
                 '"treasury_objective_fit":"misaligned|weak|acceptable|strong|excellent",'
-                '"reason_code":"<short_snake_case>",'
-                '"short_reason":"<max 240 chars>",'
+                '"reason_code":"<short_snake_case_label>",'
+                '"short_reason":"<one sentence, max 240 chars>",'
                 '"appeal_allowed":true}'
             )
 
@@ -590,22 +608,51 @@ class InvestmentCommitteeProtocol(gl.Contract):
                 f"{json.dumps(appeal_evidence, indent=2)}\n\n"
                 f"DAO policy:\n{json.dumps(policy_packet, indent=2)}\n\n"
                 f"All submitted proposals:\n{json.dumps(proposal_packets, indent=2)}\n\n"
-                "Evaluate:\n"
-                "1. Does the appeal introduce meaningful new evidence or arguments?\n"
-                "2. Was risk misinterpreted in the original recommendation?\n"
-                "3. Was liquidity misread?\n"
-                "4. Was governance risk overlooked?\n"
-                "5. Was the DAO policy misapplied?\n"
-                "6. Should the recommendation change?\n\n"
-                f"The appeal basis '{appeal_basis}' must be given careful weight.\n"
-                "Use the fetched appeal_evidence content where available.\n\n"
-                "Return a JSON object (no markdown, no extra text):\n"
+                "Follow these steps EXACTLY IN ORDER:\n\n"
+                "STEP 1 — Determine if the appeal introduces material new substance:\n"
+                f"  The appeal basis is '{appeal_basis}'.\n"
+                "  Check: does the appeal statement or fetched appeal_evidence raise a "
+                "specific factual argument that was NOT considered in the original recommendation?\n"
+                "  - If NO material new argument exists: proceed to STEP 3a.\n"
+                "  - If YES material new argument exists: proceed to STEP 2.\n\n"
+                "STEP 2 — Re-evaluate the specific policy criterion named by the appeal_basis:\n"
+                "  - liquidity_misread: Re-check the liquidity_profile of the recommended "
+                "proposal strictly against liquidity_requirement. Does it meet it under "
+                "conservative (stress) conditions, not just average conditions?\n"
+                "  - fundamental_misread: Re-verify fundamental claims against live evidence.\n"
+                "  - governance_risk_misread: Re-check team identification, audits, and "
+                "governance structure.\n"
+                "  - policy_constraint_misapplied: Re-apply the specific constraint "
+                "(allocation limits, allowed assets, etc.).\n"
+                "  - new_risk_evidence: Evaluate the new risk argument from the appeal.\n"
+                "  - For any other basis: re-evaluate the relevant criterion carefully.\n"
+                "  After re-evaluation, determine: does the original recommendation still hold?\n\n"
+                "STEP 3 — Select verdict using these rules (apply in order, stop at first match):\n"
+                "  a. If the appeal introduces no material new argument: "
+                'appeal_verdict="appeal_rejected", final_recommendation_changed=false, '
+                "new_recommended_proposal_id=0\n"
+                "  b. If re-evaluation confirms the original recommendation is correct "
+                "(the appeal argument fails on the merits): "
+                'appeal_verdict="appeal_rejected", final_recommendation_changed=false, '
+                "new_recommended_proposal_id=0\n"
+                "  c. If re-evaluation shows the original recommendation should change "
+                "to a different proposal: "
+                'appeal_verdict="appeal_granted", final_recommendation_changed=true, '
+                "new_recommended_proposal_id=<the correct proposal's proposal_id>\n"
+                "  d. If re-evaluation shows the original recommendation should be "
+                "withdrawn (no suitable proposal): "
+                'appeal_verdict="appeal_granted", final_recommendation_changed=true, '
+                "new_recommended_proposal_id=0\n"
+                "  e. If the appeal raises a genuinely unresolvable ambiguity: "
+                'appeal_verdict="manual_review_required", final_recommendation_changed=false, '
+                "new_recommended_proposal_id=0\n\n"
+                "Return ONLY a JSON object (no markdown, no extra text):\n"
                 '{"appeal_verdict":"appeal_granted|appeal_rejected|manual_review_required",'
                 '"final_recommendation_changed":<true or false>,'
-                '"new_recommended_proposal_id":<proposal_id or 0 if unchanged>,'
+                '"new_recommended_proposal_id":<proposal_id or 0>,'
                 '"confidence":<int 0-100>,'
-                '"reason_code":"<short_snake_case>",'
-                '"short_reason":"<max 240 chars>"}'
+                '"reason_code":"<short_snake_case_label>",'
+                '"short_reason":"<one sentence, max 240 chars>"}'
             )
 
             result = gl.nondet.exec_prompt(prompt, response_format='json')
@@ -625,8 +672,9 @@ class InvestmentCommitteeProtocol(gl.Contract):
                 return False
             if not isinstance(validator_data, dict):
                 return False
-            if leader_data.get("appeal_verdict") != validator_data.get("appeal_verdict"):
-                return False
+            # Canonical check: did the recommendation change, and if so to which proposal?
+            # These are the binary outcomes the DAO acts on. appeal_verdict label
+            # (granted/rejected) is derived from final_recommendation_changed anyway.
             if leader_data.get("final_recommendation_changed") != validator_data.get("final_recommendation_changed"):
                 return False
             if leader_data.get("final_recommendation_changed"):
@@ -735,6 +783,10 @@ class InvestmentCommitteeProtocol(gl.Contract):
             if raw != "":
                 result.append(json.loads(raw))
         return result
+
+    @gl.public.view
+    def get_committee_count(self) -> int:
+        return int(self._committee_counter)
 
     @gl.public.view
     def get_all_committees(self) -> list:

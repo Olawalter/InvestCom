@@ -42,12 +42,11 @@ export default function CommitteeDetailPage() {
   const cid = Number(committeeId);
 
   async function loadAll(): Promise<InvestmentCommittee | null> {
-    if (!client) return null;
     setLoading(true);
     try {
       const [c, props] = await Promise.all([
-        getCommittee(client, cid),
-        getCommitteeProposals(client, cid),
+        getCommittee(null as any, cid),
+        getCommitteeProposals(null as any, cid),
       ]);
       const committee = c as unknown as InvestmentCommittee;
       setCommittee(committee);
@@ -59,7 +58,7 @@ export default function CommitteeDetailPage() {
       ]);
       if (recStatuses.has(committee.status)) {
         try {
-          const rec = await getRecommendationResult(client, cid);
+          const rec = await getRecommendationResult(null as any, cid);
           setRecommendation(rec as unknown as RecommendationResult);
         } catch {
           // no recommendation yet
@@ -74,7 +73,7 @@ export default function CommitteeDetailPage() {
     }
   }
 
-  useEffect(() => { loadAll(); }, [client, cid]);
+  useEffect(() => { loadAll(); }, [cid]);
 
   // Actions that invoke LLM consensus need a much longer wait
   const LLM_ACTIONS = new Set(["Request Recommendation", "Appeal Review"]);

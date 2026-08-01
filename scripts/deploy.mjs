@@ -103,16 +103,20 @@ if (!receipt) {
   process.exit(0);
 }
 
-// The NewTransaction event: topic[1] = txId (bytes32) = GenLayer transaction ID.
-// For a deploy, this txId IS the address used to interact with the new contract.
+// The NewTransaction event topics:
+//   [0] event signature
+//   [1] GenLayer txId (bytes32)
+//   [2] new contract address (padded to bytes32)
+//   [3] deployer address (padded to bytes32)
 const log = receipt.logs?.[0];
-if (log && log.topics?.[1]) {
-  // txId is a 32-byte hex; GenLayer contract address = last 20 bytes (40 hex chars)
-  const txId = log.topics[1];
-  const contractAddr = "0x" + txId.slice(-40);
-  console.log("\n✓ New contract address:", contractAddr);
+if (log && log.topics?.[2]) {
+  const contractAddr = "0x" + log.topics[2].slice(-40);
+  // Compute EIP-55 checksum so the address passes viem validation
+  const { getAddress } = await import("viem");
+  const checksummed = getAddress(contractAddr);
+  console.log("\n✓ New contract address:", checksummed);
   console.log("\nUpdate .env.local:");
-  console.log(`  NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=${contractAddr}`);
+  console.log(`  NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=${checksummed}`);
 } else {
   console.log("Could not extract contract address from logs. Check explorer.");
 }

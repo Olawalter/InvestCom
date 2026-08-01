@@ -129,7 +129,8 @@ function _decodeVal(buf: Uint8Array, pos: number): [unknown, number] {
   }
 }
 function _glDecode(hex: string): unknown {
-  const bytes = fromHex(hex as Hex, "bytes");
+  const h = (hex.startsWith("0x") ? hex : `0x${hex}`) as Hex;
+  const bytes = fromHex(h, "bytes");
   const [val] = _decodeVal(bytes, 0);
   return val;
 }
